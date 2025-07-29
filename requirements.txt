@@ -1,0 +1,9 @@
+numpy
+pandas
+metatrader5
+bokeh
+matplotlib
+statistics 
+scikit-learn
+openpyxl
+
