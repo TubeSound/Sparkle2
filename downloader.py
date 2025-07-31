@@ -167,9 +167,9 @@ def main4(symbol, year, month, timeframe):
                 df.to_csv(os.path.join(dirpath, filename), index=False)
 
 if __name__ == '__main__':
-    symbol = 'NSDQ'
-    timeframe = 'tick'
-    for m in range(4, 8):
+    symbol = 'NIKKEI'
+    timeframe = 'M1'
+    for m in range(7, 8):
         main4(symbol, 2025, m, timeframe)
     
 

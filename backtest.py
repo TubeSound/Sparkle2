@@ -11,7 +11,9 @@ from dateutil import tz
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')
 
-from technical import detect_ema_cross, detect_pivots, detect_pivot_points, volatility, sma_sec, ema_diff, trade_signals
+from common import Columns, Indicators
+
+from technical import emas, ema_diff, detect_entries, detect_exits, ATRP, detect_pivots, detect_sticky
 
 def gridFig(row_rate, size):
     rows = sum(row_rate)
@@ -72,57 +74,54 @@ def tick_to_candle(df_tick: pd.DataFrame, term_sec=10) -> pd.DataFrame:
     return df_bar
 
     
-def plot1(ax, timestamps, prices, ema_quick, ema_fast, ema_slow, golden_cross_idx, dead_cross_idx):
+def plot0(ax, timestamps, prices, ema_fast, ema_mid, ema_slow, sticky):
     ax.plot(timestamps, prices, alpha=0.6, color='gray') 
-    ax.plot(timestamps, ema_quick, color='red') 
-    ax.plot(timestamps, ema_fast, color='blue', linewidth=2.0) 
+    ax.plot(timestamps, ema_fast, color='red') 
+    ax.plot(timestamps, ema_mid, color='blue', linewidth=2.0) 
     ax.plot(timestamps, ema_slow, color='orange')
-    for index in golden_cross_idx: 
-         ax.scatter(timestamps[index], ema_fast[index], color='red', marker='o', alpha=0.3, s=200)
-    for index in dead_cross_idx: 
-         ax.scatter(timestamps[index], ema_fast[index], color='green', marker='o', alpha=0.3, s=200)
+    for i in range(len(sticky)):
+        if sticky[i] == 1:
+            ax.scatter(timestamps[i], prices[i], color='gray', marker='o', alpha=0.4, s=100)
     
-def plot2(ax, pivots):
-    times = pivots[0]
-    prices = pivots[1]
-    status = pivots[2]
-    for t, price, s in zip(times, prices, status):
-        if s == 1:
-            ax.scatter(t, price, color='red', marker='v', alpha=0.4, s=80)
-        elif s == -1:
-            ax.scatter(t, price, color='green', marker='^', alpha=0.4, s=80)
+def plot1(ax, timestamps_np, ema_fast_mid, ema_mid_slow, pivots, epsilon):
+    ax.plot(timestamps_np, ema_fast_mid, color='red')
+    ax.plot(timestamps_np, ema_mid_slow, color='blue')
+    for i in range(len(pivots)):
+        if pivots[i] == 1:
+            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='red', marker='v', alpha=0.4, s=200)
+        elif pivots[i] == -1:
+            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='green', marker='^', alpha=0.4, s=200)
+    ax.axhline(y=0, color='black')
+    draw_bar1(ax, timestamps_np, ema_mid_slow, epsilon)
+    
+def plot2(ax, timestamps_np, ema_fast_mid, ema_mid_slow, entries,exits):
+    ax.plot(timestamps_np, ema_fast_mid, color='red')
+    ax.plot(timestamps_np, ema_mid_slow, color='blue')
+    plot_markers(ax, timestamps_np, ema_mid_slow, entries)
+    for i in range(len(exits)):
+        if exits[i] == 1:
+            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='gray', marker='x', alpha=0.4, s=200)
+    ax.axhline(y=0, color='black')
 
-def draw_bar1(ax, timestamps, fast_mid, mid_slow, rate=0.9):
-    status = np.full(len(timestamps), 0)
+
+def draw_bar1(ax, timestamps, mid_slow, epsilon):
     for i in range(len(timestamps) - 1):
         t0 = timestamps[i]
         t1 = timestamps[i + 1]
-        if fast_mid[i] * rate > mid_slow[i] and mid_slow[i] > 0: 
-            ax.axvspan(t0, t1, color='green', alpha=0.05)
-            status[i] = 1
-        if fast_mid[i] * rate < mid_slow[i] and mid_slow[i] < 0:
-            ax.axvspan(t0, t1, color='red', alpha=0.05)
-            status[i] = -1
-    return status        
+        if abs(mid_slow[i]) < epsilon:
+            continue
+        if mid_slow[i] > 0: 
+            ax.axvspan(t0, t1, color='green', alpha=0.1)
+        elif mid_slow[i] < 0: 
+            ax.axvspan(t0, t1, color='red', alpha=0.1)
     
 def draw_bar2(ax, timestamps, volatility, th=0.015):
-    status = np.full(len(timestamps), 0)
     for i in range(len(timestamps) - 1):
         t0 = timestamps[i]
         t1 = timestamps[i + 1]
         if volatility[i] > th: 
-            ax.axvspan(t0, t1, color='yellow', alpha=0.05)
-            status[i] = 1
-    return status
+            ax.axvspan(t0, t1, color='yellow', alpha=0.1)
 
-def draw_bar3(ax, timestamps, status):
-    for i in range(len(timestamps) - 1):
-        t0 = timestamps[i]
-        t1 = timestamps[i + 1]
-        if status[i] > 0: 
-            ax.axvspan(t0, t1, color='green', alpha=0.05)
-        if status[i] < 0:
-            ax.axvspan(t0, t1, color='red', alpha=0.05)
             
 def plot_signals(ax, signals):
     for signal in signals:
@@ -132,10 +131,35 @@ def plot_signals(ax, signals):
         ax.scatter(entry_time, entry_price, color=color, marker='^' if typ == 1 else 'v', s=100, label=f'{typ}_entry')
         ax.scatter(exit_time, exit_price, color=color, marker='x', s=100, label=f'{typ}_exit')
 
-    
+def plot_markers(ax, timestamps, values, signal):
+    for i in range(len(signal)):
+        if signal[i] == 1:
+            marker='o'
+            color='green'
+            alpha=0.1
+            s=100
+        elif signal[i] == -1:
+            marker='o'
+            color='red'
+            alpha=0.1
+            s=100
+        elif signal[i] == 2:
+            marker='^'
+            color='green'
+            alpha=0.2
+            s=200
+        elif signal[i] == -2:
+            marker='v'
+            color='red'
+            alpha=0.2
+            s=200    
+        else:
+            continue    
+        ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s)
 
 def analyze_tick(timeframe, png_path, csv_path):
     df = read_data(csv_path)
+    #df = df0.iloc[:60 * 2]
 
     # NumPy配列として取り出す
     timestamps_np = df['jst'].tolist()
@@ -144,37 +168,38 @@ def analyze_tick(timeframe, png_path, csv_path):
     if timeframe == 'tick':
         prices = df['bid'].to_numpy()
     else:
-        prices = df['close'].to_numpy()
+        op = df[Columns.OPEN].to_numpy()
+        hi = df[Columns.HIGH].to_numpy()
+        lo = df[Columns.LOW].to_numpy()
+        cl = df[Columns.CLOSE].to_numpy()
+        prices = cl
+        dic = {Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
         
     t0 = time.time()
-    ema_fast, ema_mid, ema_slow, golden_cross_idx, dead_cross_idx = detect_ema_cross(timestamps_np, prices, period_fast_sec=60 * 5, period_mid_sec=60 * 13, period_slow_sec=60 * 30)
+    ema_fast, ema_mid, ema_slow = emas(timestamps_np, prices, period_fast_sec=60 * 5, period_mid_sec=60 * 13, period_slow_sec=60 * 30)
     ema_fast_mid, ema_mid_slow = ema_diff(prices, ema_fast, ema_mid, ema_slow)
-    # ピボット検出
-    pivots = detect_pivot_points(timestamps_np, ema_fast, slide_term_sec=60 * 5)
-    volt_times, volt_values = volatility(timestamps, prices)
-    ma = sma_sec(timestamps, volt_values, window_sec=60 * 15)
-    signals = trade_signals(timestamps, ema_fast, ema_mid, ema_fast_mid, ema_mid_slow, volt_values)
+    pivots = detect_pivots(timestamps_np, ema_fast_mid, 15)
+    ATRP(dic, 5, 5)
+    atrp = dic[Indicators.ATRP]
+    atrp[0] = 0.0
+    epsilon = 0.003
+    entries = detect_entries(timestamps_np, ema_mid_slow, epsilon, 5, 0.003)
+    exits = detect_exits(timestamps_np, ema_fast_mid, epsilon)
+    sticky = detect_sticky(timestamps_np, ema_fast_mid, ema_mid_slow, epsilon)
     print('Elapsed Time: ', time.time() - t0)
 
-    fig, axes = gridFig([6, 2, 2], (16, 10))
-    plot1(axes[0], timestamps_np, prices, ema_fast, ema_mid, ema_slow, golden_cross_idx, dead_cross_idx)
-    #plot2(axes[0], pivots)
-    plot_signals(axes[0], signals)
+    fig, axes = gridFig([4, 4, 4, 2], (16, 14))
+    plot0(axes[0], timestamps_np, prices, ema_fast, ema_mid, ema_slow, sticky)
+    plot1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow, pivots, epsilon)
+    plot2(axes[2], timestamps_np, ema_fast_mid, ema_mid_slow, entries, exits)
     
-    axes[1].plot(timestamps_np, ema_fast_mid, color='red')
-    axes[1].plot(timestamps_np, ema_mid_slow, color='blue')
-    axes[1].set_ylim(-0.1, 0.1)
-    status1 = draw_bar1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow)
-    axes[1].axhline(y=0, color='yellow')
+    axes[3].plot(timestamps_np, atrp, color='orange')
+    draw_bar2(axes[3], timestamps_np, atrp)
     
-    axes[2].plot(timestamps_np, volt_values, color='blue', linewidth=2.0)
-    axes[2].plot(timestamps_np, ma, color='red')
-    axes[2].set_ylim(0, 0.2)
-    axes[2].axhline(y=0.02, color='yellow')
-    status2 = draw_bar2(axes[2], timestamps_np, ma)
-    status = status1 * status2
-    #draw_bar3(axes[0], timestamps_np, status)
-    
+    axes[1].set_ylim(-0.15, 0.15)
+    axes[2].set_ylim(-0.15, 0.15)
+    axes[3].set_ylim(0, 0.1)
+
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(png_path)
@@ -187,15 +212,14 @@ def analyze_tick(timeframe, png_path, csv_path):
     df.to_csv(path, index=False)
     """
     
-def main():
-    symbol = 'NIKKEI'
+def main(symbol):
     timeframe = 'M1'
     year = 2025
-    month = 7
-    mstr = str(month).zfill(2)
-    files = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
-    for file in files:
-        analyze(file, symbol, timeframe, year, month)
+    for month in [4, 5, 6, 7]:
+        mstr = str(month).zfill(2)
+        files = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
+        for file in files:
+            analyze(file, symbol, timeframe, year, month)
     
 def analyze(csv_path, symbol, timeframe, year, month): 
     mstr = str(month).zfill(2)
@@ -204,9 +228,8 @@ def analyze(csv_path, symbol, timeframe, year, month):
     _, filename = os.path.split(csv_path)
     name, ext = os.path.splitext(filename)
     analyze_tick(timeframe, os.path.join(dirpath, name + '.png'), csv_path)
-    
-    
 
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    main()
+    symbol = 'NSDQ'
+    main(symbol)

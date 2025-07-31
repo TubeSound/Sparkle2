@@ -4,13 +4,179 @@ import numpy as np
 import pandas as pd
 from typing import List, Tuple
 from sklearn.cluster import DBSCAN
+import math
+import statistics as stat
+from scipy.stats import rankdata
+from scipy.signal import find_peaks
+from sklearn.cluster import KMeans 
+from common import Indicators, Signal, Columns, UP, DOWN, HIGH, LOW, HOLD
+from datetime import datetime, timedelta
+from dateutil import tz
 
-def detect_pivots(timestamps, prices, slide_term_sec=60, center_sec=5):
-    pivots = detect_pivot_points(timestamps, prices, slide_term_sec, center_sec)
+JST = tz.gettz('Asia/Tokyo')
+UTC = tz.gettz('utc') 
+
+def nans(length):
+    return [np.nan for _ in range(length)]
+
+def full(length, value):
+    return [value for _ in range(length)]
+
+def is_nan(value):
+    if value is None:
+        return True
+    return np.isnan(value)
+
+def is_nans(values):
+    if len(values) == 0:
+        return True
+    for value in values:
+        if is_nan(value):
+            return True
+    return False
+
+def calc_sma(vector, window):
+    window = int(window)
+    n = len(vector)
+    out = full(n, np.nan)
+    ivalid = window- 1
+    if ivalid < 0:
+        return out
+    for i in range(ivalid, n):
+        d = vector[i - window + 1: i + 1]
+        out[i] = stat.mean(d)
+    return out
+
+def true_range(high, low, cl):
+    n = len(high)
+    out = nans(n)
+    ivalid = 1
+    for i in range(ivalid, n):
+        d = [ high[i] - low[i],
+              abs(high[i] - cl[i - 1]),
+              abs(low[i] - cl[i - 1])]
+        out[i] = max(d)
+    return out
+
+def calc_ema(vector, window):
+    window = int(window)
+    weights = np.exp(np.linspace(-1., 0., window))
+    weights /= weights.sum()
+    n = len(vector)
+    out = full(n, np.nan)
+    ivalid = window- 1
+    if ivalid < 0:
+        return out
+    for i in range(ivalid, n):
+        d = vector[i - window + 1: i + 1]
+        out[i] = np.sum(d * weights)
+    return out
+
+def calc_atr(dic, window, how='sma'):
+    hi = dic[Columns.HIGH]
+    lo = dic[Columns.LOW]
+    cl = dic[Columns.CLOSE]
+    tr = true_range(hi, lo, cl)
+    if how == 'sma':
+        atr = calc_sma(tr, window)
+    elif how == 'ema':
+        atr = calc_ema(tr, window)
+    return atr
+
+def ATR(dic: dict, term: int, term_long:int):
+    hi = dic[Columns.HIGH]
+    lo = dic[Columns.LOW]
+    cl = dic[Columns.CLOSE]
+    term = int(term)
+    tr = true_range(hi, lo, cl)
+    dic[Indicators.TR] = tr
+    atr = calc_sma(tr, term)
+    dic[Indicators.ATR] = atr
+    if term_long is not None:
+        atr_long = calc_sma(tr, term_long)
+        dic[Indicators.ATR_LONG] = atr_long
+        
+        
+        
+def ATRP(dic: dict, window, ma_window=0):
+    hi = dic[Columns.HIGH]
+    lo = dic[Columns.LOW]
+    cl = dic[Columns.CLOSE]
+    window = int(window)
+    tr = true_range(hi, lo, cl)
+    dic[Indicators.TR] = tr
+    atr = calc_sma(tr, window)
+    dic[Indicators.ATR] = atr
+
+    n = len(cl)
+    atrp = nans(n)
+    for i in range(n):
+        a = atr[i]
+        c = cl[i]
+        if is_nans([a, c]):
+            continue
+        atrp[i] = a / c * 100.0 
+        
+    if ma_window > 0:
+        atrp = calc_sma(atrp, ma_window)        
+    dic[Indicators.ATRP] = atrp
+
+
+def ADX(hi, lo, cl, di_window: int, adx_term: int):
+    tr = true_range(hi, lo, cl)
+    n = len(hi)
+    dmp = nans(n)     
+    dmm = nans(n)     
+    for i in range(1, n):
+        p = hi[i]- hi[i - 1]
+        m = lo[i - 1] - lo[i]
+        dp = dn = 0
+        if p >= 0 or n >= 0:
+            if p > m:
+                dp = p
+            if p < m:
+                dn = m
+        dmp[i] = dp
+        dmm[i] = dn
+    dip = nans(n)
+    dim = nans(n)
+    dx = nans(n)
+    for i in range(di_window - 1, n):
+        s_tr = sum(tr[i - di_window + 1: i + 1])
+        s_dmp = sum(dmp[i - di_window + 1: i + 1])
+        s_dmm = sum(dmm[i - di_window + 1: i + 1])
+        dip[i] = s_dmp / s_tr * 100 
+        dim[i] = s_dmm / s_tr * 100
+        if (dip[i] + dim[i]) == 0:
+            dx[i] = 0.0
+        else:
+            dx[i] = abs(dip[i] - dim[i]) / (dip[i] + dim[i]) * 100
+            if dx[i] < 0:
+                dx[i] = 0.0
+    adx = sma(dx, adx_term)
+    return adx, dip, dim
+
+
+## ----------------------------
+def detect_pivots(timestamps, prices, window:int):
+    n = len(prices)
+    out = np.full(n, 0)
+    for i in range(window - 1, n):
+        c = i - int(window / 2)
+        center = prices[c]
+        d = prices[i - window + 1: i + 1]
+        if max(d) == center:
+            out[c] = 1
+        elif min(d) == center:
+            out[c] = -1
+    return out       
+
+def detect_pivots_tick(timestamps, prices, slide_term_sec=60, center_sec=5):
+    pivots = detect_pivot_points_tick(timestamps, prices, slide_term_sec, center_sec)
     pivot_times, pivot_prices, pivot_types = pivots
     return extract_representative_pivot_indices(pivot_times, pivot_prices, pivot_types, timestamps, cluster_eps_sec=5, min_cluster_size=5)
 
-def detect_pivot_points(timestamps, prices, slide_term_sec=60, center_sec=5):
+def detect_pivot_points_tick(timestamps, prices, slide_term_sec=60, center_sec=5):
     window_radius = int(slide_term_sec / 2)
  
     pivot_times = []
@@ -93,7 +259,7 @@ def extract_representative_pivots(pivot_times, pivot_prices, pivot_types, timest
     return reps_time, reps_price, reps_type
 
 
-def detect_ema_cross(timestamps, prices, period_fast_sec=30, period_mid_sec=60, period_slow_sec=900):
+def emas(timestamps, prices, period_fast_sec=30, period_mid_sec=60, period_slow_sec=900):
     alpha_fast = 1 / period_fast_sec
     alpha_mid = 1 / period_mid_sec
     alpha_slow = 1 / period_slow_sec
@@ -111,13 +277,7 @@ def detect_ema_cross(timestamps, prices, period_fast_sec=30, period_mid_sec=60, 
         ema_fast[i] = alpha_f * prices[i] + (1 - alpha_f) * ema_fast[i - 1]
         ema_mid[i] = alpha_m* prices[i] + (1 - alpha_m) * ema_mid[i - 1]
         ema_slow[i] = alpha_s * prices[i] + (1 - alpha_s) * ema_slow[i - 1]
-
-    # クロス検出
-    cross_type = np.sign(ema_mid - ema_slow)
-    cross_diff = np.diff(cross_type)
-    golden_cross_idx = np.where(cross_diff == 2)[0] + 1
-    dead_cross_idx = np.where(cross_diff == -2)[0] + 1
-    return ema_fast, ema_mid, ema_slow, golden_cross_idx, dead_cross_idx
+    return ema_fast, ema_mid, ema_slow
 
 def ema_diff(prices, ema_fast, ema_mid, ema_slow):
     # 差分パーセント計算
@@ -126,6 +286,41 @@ def ema_diff(prices, ema_fast, ema_mid, ema_slow):
         mid_slow_diff_pct = 100 * (ema_mid - ema_slow) / prices
     return fast_mid_diff_pct, mid_slow_diff_pct
     
+    
+def detect_entries(timestamps, ema_mid_slow, begin_range, window: int, delta_min):
+    n = len(ema_mid_slow)
+    out = np.full(n, 0)
+    for i in range(window - 1, n):
+        if timestamps[i] > datetime(2025, 7, 1, 9, 5).astimezone(tz=JST):
+            pass
+        v0 = ema_mid_slow[i - window + 1]
+        v1 = ema_mid_slow[i]
+        if abs(v0) <= begin_range:
+            if v1 > 0:
+                out[i - window + 1] = 1
+            elif v1 < 0:
+                out[i - window + 1] = -1
+            if (v1 - v0) > delta_min:
+                out[i] = 2
+            elif (v1 - v0) < -delta_min:
+                out[i] = -2
+    return out
+
+def detect_exits(timestamps, ema_fast_mid, epsilon):
+    n = len(ema_fast_mid)
+    out = np.full(n, 0)
+    for i in range(n):
+        if abs(ema_fast_mid[i]) < epsilon:
+            out[i] = 1
+    return out
+
+def detect_sticky(timestamps, ema_fast_mid, ema_mid_slow, epsilon):
+    n = len(ema_fast_mid)
+    out = np.full(n, 0)
+    for i in range(n):
+        if (abs(ema_fast_mid[i])) < epsilon and (abs(ema_mid_slow[i]) < epsilon):
+            out[i] = 1
+    return out
     
 def volatility(timestamps, prices, window_sec=300):
     vol_times = []
@@ -173,19 +368,7 @@ def sma_sec(timestamps, values, window_sec):
             sma[i] = np.mean(values[mask])  # ← mask が正しく boolean array なら OK
 
     return sma
-  
-    
-#　timestamps: numpy datetime    
-def sma_sec_old(timestamps, values, window_sec):
-    # 秒単位でrollingしたい場合
-    times = np.array([t.timestamp() for t in timestamps])
-    sma = np.full(len(values), np.nan)
-    for i in range(len(values)):
-        t0 = times[i] - window_sec
-        mask = (times >= t0) & (times <= times[i])
-        if np.sum(mask) > 0:
-            sma[i] = np.mean(values[mask])
-    return sma
+
 
 def detect_ema_pivots(timestamps: np.ndarray, ema: np.ndarray, lookback_sec: int = 150, threshold: float = 0.00005) -> Tuple[List, List]:
     """
@@ -263,3 +446,5 @@ def trade_signals(timestamps, prices, ema_mid, ema_fast_mid, ema_mid_slow,  vola
                 position = None
 
     return signals
+
+
