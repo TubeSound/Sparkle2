@@ -287,7 +287,7 @@ def ema_diff(prices, ema_fast, ema_mid, ema_slow):
     return fast_mid_diff_pct, mid_slow_diff_pct
     
     
-def detect_entries(timestamps, ema_mid_slow, begin_range, window: int, delta_min):
+def detect_birdspeek(timestamps, ema_mid_slow, begin_range, window: int, epsilon):
     n = len(ema_mid_slow)
     out = np.full(n, 0)
     for i in range(window - 1, n):
@@ -300,13 +300,13 @@ def detect_entries(timestamps, ema_mid_slow, begin_range, window: int, delta_min
                 out[i - window + 1] = 1
             elif v1 < 0:
                 out[i - window + 1] = -1
-            if (v1 - v0) > delta_min:
+            if (v1 - v0) > epsilon:
                 out[i] = 2
-            elif (v1 - v0) < -delta_min:
+            elif (v1 - v0) < -epsilon:
                 out[i] = -2
     return out
 
-def detect_exits(timestamps, ema_fast_mid, epsilon):
+def detect_taper(timestamps, ema_fast_mid, epsilon):
     n = len(ema_fast_mid)
     out = np.full(n, 0)
     for i in range(n):
@@ -320,6 +320,18 @@ def detect_sticky(timestamps, ema_fast_mid, ema_mid_slow, epsilon):
     for i in range(n):
         if (abs(ema_fast_mid[i])) < epsilon and (abs(ema_mid_slow[i]) < epsilon):
             out[i] = 1
+    return out
+
+def detect_trend(timestamps, mid_slow, epsilon):
+    n = len(mid_slow)
+    out = np.full(n, 0)
+    for i in range(len(timestamps) - 1):
+        if abs(mid_slow[i]) < epsilon:
+            continue
+        if mid_slow[i] > 0: 
+            out[i] = 1
+        elif mid_slow[i] < 0: 
+            out[i] = -1
     return out
     
 def volatility(timestamps, prices, window_sec=300):

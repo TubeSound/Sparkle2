@@ -13,7 +13,7 @@ UTC = tz.gettz('utc')
 
 from common import Columns, Indicators
 
-from technical import emas, ema_diff, detect_entries, detect_exits, ATRP, detect_pivots, detect_sticky
+from technical import emas, ema_diff, detect_birdspeek, detect_taper, detect_trend, ATRP, detect_pivots, detect_sticky
 
 def gridFig(row_rate, size):
     rows = sum(row_rate)
@@ -83,7 +83,7 @@ def plot0(ax, timestamps, prices, ema_fast, ema_mid, ema_slow, sticky):
         if sticky[i] == 1:
             ax.scatter(timestamps[i], prices[i], color='gray', marker='o', alpha=0.4, s=100)
     
-def plot1(ax, timestamps_np, ema_fast_mid, ema_mid_slow, pivots, epsilon):
+def plot1(ax, timestamps_np, ema_fast_mid, ema_mid_slow, pivots, trend):
     ax.plot(timestamps_np, ema_fast_mid, color='red')
     ax.plot(timestamps_np, ema_mid_slow, color='blue')
     for i in range(len(pivots)):
@@ -92,7 +92,7 @@ def plot1(ax, timestamps_np, ema_fast_mid, ema_mid_slow, pivots, epsilon):
         elif pivots[i] == -1:
             ax.scatter(timestamps_np[i], ema_fast_mid[i], color='green', marker='^', alpha=0.4, s=200)
     ax.axhline(y=0, color='black')
-    draw_bar1(ax, timestamps_np, ema_mid_slow, epsilon)
+    draw_bar1(ax, timestamps_np, trend)
     
 def plot2(ax, timestamps_np, ema_fast_mid, ema_mid_slow, entries,exits):
     ax.plot(timestamps_np, ema_fast_mid, color='red')
@@ -103,16 +103,13 @@ def plot2(ax, timestamps_np, ema_fast_mid, ema_mid_slow, entries,exits):
             ax.scatter(timestamps_np[i], ema_fast_mid[i], color='gray', marker='x', alpha=0.4, s=200)
     ax.axhline(y=0, color='black')
 
-
-def draw_bar1(ax, timestamps, mid_slow, epsilon):
+def draw_bar1(ax, timestamps, trend):
     for i in range(len(timestamps) - 1):
         t0 = timestamps[i]
         t1 = timestamps[i + 1]
-        if abs(mid_slow[i]) < epsilon:
-            continue
-        if mid_slow[i] > 0: 
+        if trend[i] == 1: 
             ax.axvspan(t0, t1, color='green', alpha=0.1)
-        elif mid_slow[i] < 0: 
+        elif trend[i] == -1: 
             ax.axvspan(t0, t1, color='red', alpha=0.1)
     
 def draw_bar2(ax, timestamps, volatility, th=0.015):
@@ -183,15 +180,16 @@ def analyze_tick(timeframe, png_path, csv_path):
     atrp = dic[Indicators.ATRP]
     atrp[0] = 0.0
     epsilon = 0.003
-    entries = detect_entries(timestamps_np, ema_mid_slow, epsilon, 5, 0.003)
-    exits = detect_exits(timestamps_np, ema_fast_mid, epsilon)
+    peeks = detect_birdspeek(timestamps_np, ema_mid_slow, epsilon, 5, 0.003)
+    tapers = detect_taper(timestamps_np, ema_fast_mid, epsilon)
     sticky = detect_sticky(timestamps_np, ema_fast_mid, ema_mid_slow, epsilon)
+    trend = detect_trend(timestamps_np, ema_mid_slow, epsilon)
     print('Elapsed Time: ', time.time() - t0)
 
     fig, axes = gridFig([4, 4, 4, 2], (16, 14))
     plot0(axes[0], timestamps_np, prices, ema_fast, ema_mid, ema_slow, sticky)
-    plot1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow, pivots, epsilon)
-    plot2(axes[2], timestamps_np, ema_fast_mid, ema_mid_slow, entries, exits)
+    plot1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow, pivots, trend)
+    plot2(axes[2], timestamps_np, ema_fast_mid, ema_mid_slow, peeks, tapers)
     
     axes[3].plot(timestamps_np, atrp, color='orange')
     draw_bar2(axes[3], timestamps_np, atrp)
