@@ -13,7 +13,7 @@ UTC = tz.gettz('utc')
 
 from common import Columns, Indicators
 
-from technical import emas, ema_diff, detect_birdspeek, detect_taper, detect_trend, ATRP, detect_pivots, detect_sticky
+from technical import emas, ema_diff, detect_birdspeek, detect_taper, detect_trend, calc_range, ATRP, detect_pivots, detect_sticky
 
 def gridFig(row_rate, size):
     rows = sum(row_rate)
@@ -184,19 +184,24 @@ def analyze_tick(timeframe, png_path, csv_path):
     tapers = detect_taper(timestamps_np, ema_fast_mid, epsilon)
     sticky = detect_sticky(timestamps_np, ema_fast_mid, ema_mid_slow, epsilon)
     trend = detect_trend(timestamps_np, ema_mid_slow, epsilon)
+    rng = calc_range(op, cl, 10)
     print('Elapsed Time: ', time.time() - t0)
 
-    fig, axes = gridFig([4, 4, 4, 2], (16, 14))
+    fig, axes = gridFig([4, 4, 4, 2, 2], (16, 14))
     plot0(axes[0], timestamps_np, prices, ema_fast, ema_mid, ema_slow, sticky)
     plot1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow, pivots, trend)
     plot2(axes[2], timestamps_np, ema_fast_mid, ema_mid_slow, peeks, tapers)
     
-    axes[3].plot(timestamps_np, atrp, color='orange')
+    axes[3].plot(timestamps_np, atrp, color='orange', label='ATRP')
     draw_bar2(axes[3], timestamps_np, atrp)
+    
+    axes[4].plot(timestamps_np, rng, color='red', label='RANGEP')
+    draw_bar2(axes[4], timestamps_np, rng, th=0.1)
     
     axes[1].set_ylim(-0.15, 0.15)
     axes[2].set_ylim(-0.15, 0.15)
     axes[3].set_ylim(0, 0.1)
+    [ax.legend() for ax in axes]
 
     plt.xticks(rotation=45)
     plt.tight_layout()

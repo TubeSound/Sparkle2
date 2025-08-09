@@ -287,6 +287,17 @@ def ema_diff(prices, ema_fast, ema_mid, ema_slow):
     return fast_mid_diff_pct, mid_slow_diff_pct
     
     
+def calc_range(op, cl, window):
+    n = len(op)
+    out = np.full(n, np.nan)
+    for i in range(window - 1, n):
+        o = op[i - window + 1: i + 1]
+        c = cl[i - window + 1: i + 1]
+        mx = max(np.max(o), np.max(c))
+        mn = min(np.min(o), np.min(c))
+        out[i] = (mx - mn) / cl[i] * 100.0
+    return out
+    
 def detect_birdspeek(timestamps, ema_mid_slow, begin_range, window: int, epsilon):
     n = len(ema_mid_slow)
     out = np.full(n, 0)
