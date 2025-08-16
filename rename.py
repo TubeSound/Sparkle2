@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 # 対象フォルダ（フルパスで指定 or 相対パス）
-TARGET_FOLDER = r"C:\Users\docs9\OneDrive\デスクトップ\2025_06_15_window_wall"  # ここを書き換えて
+TARGET_FOLDER = r"C:\Users\docs9\OneDrive\デスクトップ\2025-08-13_seaside"  # ここを書き換えて
 
 # 曜日略称（Python標準のMon, Tue, ...）
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

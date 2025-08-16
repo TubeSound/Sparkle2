@@ -12,8 +12,9 @@ JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')
 
 from common import Columns, Indicators
-
 from technical import emas, ema_diff, detect_birdspeek, detect_taper, detect_trend, calc_range, ATRP, detect_pivots, detect_sticky
+from html_writer import HtmlWriter
+
 
 def gridFig(row_rate, size):
     rows = sum(row_rate)
@@ -154,59 +155,79 @@ def plot_markers(ax, timestamps, values, signal):
             continue    
         ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s)
 
-def analyze_tick(timeframe, png_path, csv_path):
+def analyze(title, csv_path):
     df = read_data(csv_path)
     #df = df0.iloc[:60 * 2]
 
     # NumPy配列として取り出す
     timestamps_np = df['jst'].tolist()
-    
     timestamps = df["jst"].values
-    if timeframe == 'tick':
-        prices = df['bid'].to_numpy()
-    else:
-        op = df[Columns.OPEN].to_numpy()
-        hi = df[Columns.HIGH].to_numpy()
-        lo = df[Columns.LOW].to_numpy()
-        cl = df[Columns.CLOSE].to_numpy()
-        prices = cl
-        dic = {Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
+    op = df[Columns.OPEN].to_numpy()
+    hi = df[Columns.HIGH].to_numpy()
+    lo = df[Columns.LOW].to_numpy()
+    cl = df[Columns.CLOSE].to_numpy()
+    prices = cl
+    dic = {Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
         
     t0 = time.time()
     ema_fast, ema_mid, ema_slow = emas(timestamps_np, prices, period_fast_sec=60 * 5, period_mid_sec=60 * 13, period_slow_sec=60 * 30)
     ema_fast_mid, ema_mid_slow = ema_diff(prices, ema_fast, ema_mid, ema_slow)
     pivots = detect_pivots(timestamps_np, ema_fast_mid, 15)
-    ATRP(dic, 5, 5)
-    atrp = dic[Indicators.ATRP]
-    atrp[0] = 0.0
+    #ATRP(dic, 5, 5)
+    #atrp = dic[Indicators.ATRP]
+    #atrp[0] = 0.0
     epsilon = 0.003
     peeks = detect_birdspeek(timestamps_np, ema_mid_slow, epsilon, 5, 0.003)
     tapers = detect_taper(timestamps_np, ema_fast_mid, epsilon)
     sticky = detect_sticky(timestamps_np, ema_fast_mid, ema_mid_slow, epsilon)
     trend = detect_trend(timestamps_np, ema_mid_slow, epsilon)
-    rng = calc_range(op, cl, 10)
+    rng = calc_range(op, cl, 12)
     print('Elapsed Time: ', time.time() - t0)
-
-    fig, axes = gridFig([4, 4, 4, 2, 2], (16, 14))
-    plot0(axes[0], timestamps_np, prices, ema_fast, ema_mid, ema_slow, sticky)
-    plot1(axes[1], timestamps_np, ema_fast_mid, ema_mid_slow, pivots, trend)
-    plot2(axes[2], timestamps_np, ema_fast_mid, ema_mid_slow, peeks, tapers)
     
-    axes[3].plot(timestamps_np, atrp, color='orange', label='ATRP')
-    draw_bar2(axes[3], timestamps_np, atrp)
+    data = {'jst': timestamps_np,
+            'price': prices,
+            'ema_fast': ema_fast,
+            'ema_mid': ema_mid,
+            'ema_slow': ema_slow,
+            'ema_fast_mid': ema_fast_mid,
+            'ema_mid_slow': ema_mid_slow,
+            'pivot': pivots,
+            'range': rng,
+            'sticky': sticky,
+            'peeks': peeks,
+            'tapers': tapers,
+            'trend': trend            
+            }
     
-    axes[4].plot(timestamps_np, rng, color='red', label='RANGEP')
-    draw_bar2(axes[4], timestamps_np, rng, th=0.1)
+    return plot_chart(title, data)
     
-    axes[1].set_ylim(-0.15, 0.15)
+    
+def plot_chart(title, data):
+    fig, axes = gridFig([4, 2, 4, 4], (22, 14))
+    plot0(axes[0], data['jst'], data['price'], data['ema_fast'], data['ema_mid'], data['ema_slow'], data['sticky'])
+    axes[1].plot(data['jst'], data['range'], color='red', label='RANGEP')
+    draw_bar2(axes[1], data['jst'], data['range'], th=0.15)
+    axes[1].set_ylim(0, 0.2)
+    
+    t0 = data['jst'][0]
+    t1 = data['jst'][-1]
+    title += '          ' + str(t0) + ' -> ' + str(t1)
+    axes[0].set_title(title)
+    
+    #axes[2].plot(timestamps_np, atrp, color='orange', label='ATRP')
+    #draw_bar2(axes[2], timestamps_np, atrp)
+    
+    
+    plot1(axes[2], data['jst'], data['ema_fast_mid'], data['ema_mid_slow'], data['pivot'], data['trend'])
+    plot2(axes[3], data['jst'], data['ema_fast_mid'], data['ema_mid_slow'], data['peeks'], data['tapers'])
     axes[2].set_ylim(-0.15, 0.15)
-    axes[3].set_ylim(0, 0.1)
+    axes[3].set_ylim(-0.15, 0.15)
     [ax.legend() for ax in axes]
 
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(png_path)
     plt.close()
+    return fig
     
     """
     timestamp_sec = np.array([t.timestamp() for t in timestamps])
@@ -221,18 +242,18 @@ def main(symbol):
     for month in [4, 5, 6, 7]:
         mstr = str(month).zfill(2)
         files = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
+        writer = HtmlWriter()
         for file in files:
-            analyze(file, symbol, timeframe, year, month)
+            _, filename = os.path.split(file)
+            name, _ = os.path.splitext(filename)
+            fig = analyze(f'{name}', file)
+            writer.add_fig(fig)
+        os.makedirs(f'./chart/{symbol}', exist_ok=True)
+        path = f'./chart/{symbol}/{symbol}_{year}_{mstr}.html'
+        writer.write(path)
     
-def analyze(csv_path, symbol, timeframe, year, month): 
-    mstr = str(month).zfill(2)
-    dirpath = f'./chart/{timeframe}/{symbol}/{year}/{mstr}'
-    os.makedirs(dirpath, exist_ok=True)
-    _, filename = os.path.split(csv_path)
-    name, ext = os.path.splitext(filename)
-    analyze_tick(timeframe, os.path.join(dirpath, name + '.png'), csv_path)
 
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    symbol = 'NSDQ'
+    symbol = 'NIKKEI'
     main(symbol)
