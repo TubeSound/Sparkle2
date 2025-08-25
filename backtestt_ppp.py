@@ -12,8 +12,9 @@ JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')
 
 from common import Columns, Indicators
-from technical import emas, ema_diff, detect_birdspeek, detect_taper, detect_trend, calc_range, ATRP, detect_pivots, detect_sticky
 from html_writer import HtmlWriter
+
+from ppp import PPP
 
 
 def gridFig(row_rate, size):
@@ -75,51 +76,26 @@ def tick_to_candle(df_tick: pd.DataFrame, term_sec=10) -> pd.DataFrame:
     return df_bar
 
     
-def plot0(ax, timestamps, prices, ema_fast, ema_mid, ema_slow, sticky):
-    ax.plot(timestamps, prices, alpha=0.6, color='gray') 
-    ax.plot(timestamps, ema_fast, color='red') 
-    ax.plot(timestamps, ema_mid, color='blue', linewidth=2.0) 
-    ax.plot(timestamps, ema_slow, color='orange')
-    for i in range(len(sticky)):
-        if sticky[i] == 1:
-            ax.scatter(timestamps[i], prices[i], color='gray', marker='o', alpha=0.4, s=100)
-    
-def plot1(ax, timestamps_np, ema_fast_mid, ema_mid_slow, pivots, trend):
-    ax.plot(timestamps_np, ema_fast_mid, color='red')
-    ax.plot(timestamps_np, ema_mid_slow, color='blue')
-    for i in range(len(pivots)):
-        if pivots[i] == 1:
-            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='red', marker='v', alpha=0.4, s=200)
-        elif pivots[i] == -1:
-            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='green', marker='^', alpha=0.4, s=200)
-    ax.axhline(y=0, color='black')
-    draw_bar1(ax, timestamps_np, trend)
-    
-def plot2(ax, timestamps_np, ema_fast_mid, ema_mid_slow, entries,exits):
-    ax.plot(timestamps_np, ema_fast_mid, color='red')
-    ax.plot(timestamps_np, ema_mid_slow, color='blue')
-    plot_markers(ax, timestamps_np, ema_mid_slow, entries)
-    for i in range(len(exits)):
-        if exits[i] == 1:
-            ax.scatter(timestamps_np[i], ema_fast_mid[i], color='gray', marker='x', alpha=0.4, s=200)
-    ax.axhline(y=0, color='black')
 
-def draw_bar1(ax, timestamps, trend):
+
+def draw_bar(ax, timestamps, signal):
     for i in range(len(timestamps) - 1):
         t0 = timestamps[i]
         t1 = timestamps[i + 1]
-        if trend[i] == 1: 
+        if signal[i] == 1: 
             ax.axvspan(t0, t1, color='green', alpha=0.1)
-        elif trend[i] == -1: 
+        elif signal[i] == -1: 
             ax.axvspan(t0, t1, color='red', alpha=0.1)
-    
-def draw_bar2(ax, timestamps, volatility, th=0.015):
-    for i in range(len(timestamps) - 1):
-        t0 = timestamps[i]
-        t1 = timestamps[i + 1]
-        if volatility[i] > th: 
-            ax.axvspan(t0, t1, color='yellow', alpha=0.1)
 
+def draw_bar_level(ax, timestamps, signal, level):
+    n = len(signal)
+    sign = np.full(n, 0)
+    for i in range(n):
+        if signal[i] >= level:
+            sign[i] = 1
+        elif signal[i] <= -level:
+            sign[i] = -1
+    draw_bar(ax, timestamps, sign)
             
 def plot_signals(ax, signals):
     for signal in signals:
@@ -130,17 +106,21 @@ def plot_signals(ax, signals):
         ax.scatter(exit_time, exit_price, color=color, marker='x', s=100, label=f'{typ}_exit')
 
 def plot_markers(ax, timestamps, values, signal):
+    label_written0 = False
+    label_written1 = False
     for i in range(len(signal)):
         if signal[i] == 1:
-            marker='o'
-            color='green'
-            alpha=0.1
-            s=100
-        elif signal[i] == -1:
-            marker='o'
+            marker='v'
             color='red'
-            alpha=0.1
+            alpha=0.4
             s=100
+            label='V Pivot Point (Sell)'
+        elif signal[i] == -1:
+            marker='^'
+            color='green'
+            alpha=0.4
+            s=100
+            label='^ Pivot Point (Buy)'
         elif signal[i] == 2:
             marker='^'
             color='green'
@@ -152,10 +132,20 @@ def plot_markers(ax, timestamps, values, signal):
             alpha=0.2
             s=200    
         else:
-            continue    
-        ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s)
+            continue
+        if not label_written0 and signal[i] == 1:
+            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
+            label_written0 = True
+        elif not label_written1 and signal[i] == -1:    
+            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
+            label_written1 = True
+        else:
+            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s)
 
 def analyze(title, csv_path):
+    SHORT_TERM = 10
+    MID_TERM = 20
+    LONG_TERM = 50
     df = read_data(csv_path)
     #df = df0.iloc[:60 * 2]
 
@@ -167,61 +157,40 @@ def analyze(title, csv_path):
     lo = df[Columns.LOW].to_numpy()
     cl = df[Columns.CLOSE].to_numpy()
     prices = cl
-    dic = {Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
+    dic = {Columns.JST: timestamps_np, Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
         
-    t0 = time.time()
-    ema_fast, ema_mid, ema_slow = emas(timestamps_np, prices, period_fast_sec=60 * 5, period_mid_sec=60 * 13, period_slow_sec=60 * 100)
-    ema_fast_mid, ema_mid_slow = ema_diff(prices, ema_fast, ema_mid, ema_slow)
-    pivots = detect_pivots(timestamps_np, ema_fast_mid, 15)
-    #ATRP(dic, 5, 5)
-    #atrp = dic[Indicators.ATRP]
-    #atrp[0] = 0.0
-    epsilon = 0.003
-    peeks = detect_birdspeek(timestamps_np, ema_mid_slow, epsilon, 5, 0.003)
-    tapers = detect_taper(timestamps_np, ema_fast_mid, epsilon)
-    sticky = detect_sticky(timestamps_np, ema_fast_mid, ema_mid_slow, epsilon)
-    trend = detect_trend(timestamps_np, ema_mid_slow, epsilon)
-    rng = calc_range(op, cl, 12)
+    t0 = time.time() 
+    ppp = PPP(SHORT_TERM, MID_TERM, LONG_TERM, 0.7, 0.5)
+    ppp.calc(dic)
     print('Elapsed Time: ', time.time() - t0)
-    
-    data = {'jst': timestamps_np,
-            'price': prices,
-            'ema_fast': ema_fast,
-            'ema_mid': ema_mid,
-            'ema_slow': ema_slow,
-            'ema_fast_mid': ema_fast_mid,
-            'ema_mid_slow': ema_mid_slow,
-            'pivot': pivots,
-            'range': rng,
-            'sticky': sticky,
-            'peeks': peeks,
-            'tapers': tapers,
-            'trend': trend            
-            }
-    
-    return plot_chart(title, data)
+   
+    return plot_chart(title, timestamps_np, ppp, SHORT_TERM, MID_TERM, LONG_TERM)
     
     
-def plot_chart(title, data):
-    fig, axes = gridFig([4, 2, 4, 4], (22, 14))
-    plot0(axes[0], data['jst'], data['price'], data['ema_fast'], data['ema_mid'], data['ema_slow'], data['sticky'])
-    axes[1].plot(data['jst'], data['range'], color='red', label='RANGEP')
-    draw_bar2(axes[1], data['jst'], data['range'], th=0.15)
-    axes[1].set_ylim(0, 0.2)
+def plot_chart(title, timestamp, ppp, short_term, mid_term, long_term):
+    fig, axes = gridFig([4, 3, 3, 3], (12, 10))
+    axes[0].plot(timestamp, ppp.cl, color='gray', label='Close')
+    axes[0].plot(timestamp, ppp.short, color='red', label = f'EMA({short_term})-Short')
+    axes[0].plot(timestamp, ppp.mid, color='green', label=f'EMA({mid_term})-Mid')
+    axes[0].plot(timestamp, ppp.long, color='blue', label=f'EMA({long_term})-Long')
     
-    t0 = data['jst'][0]
-    t1 = data['jst'][-1]
+    axes[1].plot(timestamp, ppp.mid_long_diff_pct, color='blue', label='(Mid-Long)%')
+    plot_markers(axes[1], timestamp, ppp.mid_long_diff_pct, ppp.pivot)
+    
+    axes[2].plot(timestamp, ppp.atrp, color='purple', label='ATRP')
+    
+    
+    axes[3].plot(timestamp, ppp.short_slope, color='red', label='EMA-Short slope')
+    axes[3].plot(timestamp, ppp.mid_slope, color='green', label='EMA-Mid slope')
+    axes[3].plot(timestamp, ppp.long_slope, color='blue', label='EMA-Long slope')
+    
+    draw_bar_level(axes[3], timestamp, ppp.mid_slope, 0.2)
+    
+    
+    t0 = timestamp[0]
+    t1 = timestamp[-1]
     title += '          ' + str(t0) + ' -> ' + str(t1)
     axes[0].set_title(title)
-    
-    #axes[2].plot(timestamps_np, atrp, color='orange', label='ATRP')
-    #draw_bar2(axes[2], timestamps_np, atrp)
-    
-    
-    plot1(axes[2], data['jst'], data['ema_fast_mid'], data['ema_mid_slow'], data['pivot'], data['trend'])
-    plot2(axes[3], data['jst'], data['ema_fast_mid'], data['ema_mid_slow'], data['peeks'], data['tapers'])
-    axes[2].set_ylim(-0.15, 0.15)
-    axes[3].set_ylim(-0.15, 0.15)
     [ax.legend() for ax in axes]
 
     plt.xticks(rotation=45)
@@ -248,12 +217,12 @@ def main(symbol):
             name, _ = os.path.splitext(filename)
             fig = analyze(f'{name}', file)
             writer.add_fig(fig)
-        os.makedirs(f'./chart/{symbol}', exist_ok=True)
-        path = f'./chart/{symbol}/{symbol}_{year}_{mstr}.html'
+        os.makedirs(f'./PPP/{symbol}', exist_ok=True)
+        path = f'./PPP/{symbol}/{symbol}_{year}_{mstr}.html'
         writer.write(path)
     
 
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    symbol = 'NIKKEI'
+    symbol = 'NSDQ'
     main(symbol)

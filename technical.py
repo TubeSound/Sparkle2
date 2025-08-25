@@ -120,6 +120,7 @@ def ATRP(dic: dict, window, ma_window=0):
     if ma_window > 0:
         atrp = calc_sma(atrp, ma_window)        
     dic[Indicators.ATRP] = atrp
+    return atrp
 
 
 def ADX(hi, lo, cl, di_window: int, adx_term: int):
@@ -153,12 +154,12 @@ def ADX(hi, lo, cl, di_window: int, adx_term: int):
             dx[i] = abs(dip[i] - dim[i]) / (dip[i] + dim[i]) * 100
             if dx[i] < 0:
                 dx[i] = 0.0
-    adx = sma(dx, adx_term)
+    adx = calc_sma(dx, adx_term)
     return adx, dip, dim
 
 
 ## ----------------------------
-def detect_pivots(timestamps, prices, window:int):
+def detect_pivots(prices, window:int):
     n = len(prices)
     out = np.full(n, 0)
     for i in range(window - 1, n):
@@ -279,12 +280,12 @@ def emas(timestamps, prices, period_fast_sec=30, period_mid_sec=60, period_slow_
         ema_slow[i] = alpha_s * prices[i] + (1 - alpha_s) * ema_slow[i - 1]
     return ema_fast, ema_mid, ema_slow
 
-def ema_diff(prices, ema_fast, ema_mid, ema_slow):
+def ema_diff(prices, ema_short, ema_mid, ema_long):
     # 差分パーセント計算
     with np.errstate(divide='ignore', invalid='ignore'):
-        fast_mid_diff_pct = 100 * (ema_fast - ema_mid) / prices
-        mid_slow_diff_pct = 100 * (ema_mid - ema_slow) / prices
-    return fast_mid_diff_pct, mid_slow_diff_pct
+        short_mid_diff_pct = 100 * (ema_short - ema_mid) / prices
+        mid_long_diff_pct = 100 * (ema_mid - ema_long) / prices
+    return short_mid_diff_pct, mid_long_diff_pct
     
     
 def calc_range(op, cl, window):
@@ -470,4 +471,36 @@ def trade_signals(timestamps, prices, ema_mid, ema_fast_mid, ema_mid_slow,  vola
 
     return signals
 
+def slope(vector):
+    n = len(vector)
+    d = np.array(vector)
+    m, offset = np.polyfit(range(n), d, 1)
+    return m, offset 
 
+
+def slopes(vector, window):
+    n = len(vector)
+    out = np.full(n, np.nan)
+    for i in range(window - 1, n):
+        d = vector[i - window + 1: i + 1]
+        m, offset = slope(d)
+        out[i] = m
+    return out
+
+
+def majority_filter(vector, target_values, window, threshold=1.0):
+    n = len(vector)
+    out = np.full(n, 0)
+    for i in range(window - 1, n):
+        d = vector[i - window + 1: i + 1]
+        if is_nans(d):
+            continue
+        for target_value in target_values:
+            r = 0
+            for dd in d:
+                if dd == target_value:
+                    r += 1
+            if float(r / window) >= threshold:
+                out[i] = target_value
+                continue
+    return out
