@@ -159,17 +159,27 @@ def ADX(hi, lo, cl, di_window: int, adx_term: int):
 
 
 ## ----------------------------
-def detect_pivots(prices, window:int):
+def detect_pivots(prices, window:int, depth_min):
     n = len(prices)
     out = np.full(n, 0)
-    for i in range(window - 1, n):
-        c = i - int(window / 2)
+    half = int(window / 2)
+    for i in range(half - 1, n):
+        c = i - half
         center = prices[c]
-        d = prices[i - window + 1: i + 1]
+        begin = i - window + 1
+        if begin < 0:
+            begin = 0
+        d = prices[begin: i + 1]
         if max(d) == center:
-            out[c] = 1
+            depth = center - min(d)
+            if depth >= depth_min:
+                out[c] = 1
+                out[i] = 2
         elif min(d) == center:
-            out[c] = -1
+            depth = max(d) - center
+            if depth >= depth_min:
+                out[c] = -1
+                out[i] = -2
     return out       
 
 def detect_pivots_tick(timestamps, prices, slide_term_sec=60, center_sec=5):
