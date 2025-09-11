@@ -16,11 +16,6 @@ from dateutil import tz
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc') 
 
-def nans(length):
-    return [np.nan for _ in range(length)]
-
-def full(length, value):
-    return [value for _ in range(length)]
 
 def is_nan(value):
     if value is None:
@@ -38,7 +33,7 @@ def is_nans(values):
 def calc_sma(vector, window):
     window = int(window)
     n = len(vector)
-    out = full(n, np.nan)
+    out = np.full(n, np.nan)
     ivalid = window- 1
     if ivalid < 0:
         return out
@@ -49,7 +44,7 @@ def calc_sma(vector, window):
 
 def true_range(high, low, cl):
     n = len(high)
-    out = nans(n)
+    out = np.full(n, np.nan)
     ivalid = 1
     for i in range(ivalid, n):
         d = [ high[i] - low[i],
@@ -63,7 +58,7 @@ def calc_ema(vector, window):
     weights = np.exp(np.linspace(-1., 0., window))
     weights /= weights.sum()
     n = len(vector)
-    out = full(n, np.nan)
+    out = np.full(n, np.nan)
     ivalid = window- 1
     if ivalid < 0:
         return out
@@ -109,7 +104,7 @@ def ATRP(dic: dict, window, ma_window=0):
     dic[Indicators.ATR] = atr
 
     n = len(cl)
-    atrp = nans(n)
+    atrp = np.full(n, np.nan)
     for i in range(n):
         a = atr[i]
         c = cl[i]
@@ -119,6 +114,8 @@ def ATRP(dic: dict, window, ma_window=0):
         
     if ma_window > 0:
         atrp = calc_sma(atrp, ma_window)        
+        for i in range(ma_window):
+            atrp[i] = 0
     dic[Indicators.ATRP] = atrp
     return atrp
 
@@ -126,8 +123,8 @@ def ATRP(dic: dict, window, ma_window=0):
 def ADX(hi, lo, cl, di_window: int, adx_term: int):
     tr = true_range(hi, lo, cl)
     n = len(hi)
-    dmp = nans(n)     
-    dmm = nans(n)     
+    dmp = np.full(n, np.nan)
+    dmm = np.full(n, np.nan)
     for i in range(1, n):
         p = hi[i]- hi[i - 1]
         m = lo[i - 1] - lo[i]
@@ -139,9 +136,9 @@ def ADX(hi, lo, cl, di_window: int, adx_term: int):
                 dn = m
         dmp[i] = dp
         dmm[i] = dn
-    dip = nans(n)
-    dim = nans(n)
-    dx = nans(n)
+    dip = np.full(n, np.nan)
+    dim = np.full(n, np.nan)
+    dx = np.full(n, np.nan)
     for i in range(di_window - 1, n):
         s_tr = sum(tr[i - di_window + 1: i + 1])
         s_dmp = sum(dmp[i - di_window + 1: i + 1])
@@ -182,6 +179,41 @@ def detect_pivots(prices, window:int, depth_min):
                 out[i] = -2
     return out       
 
+
+def slice_upper_abs(prices, threshold):
+    n = len(prices)
+    out = np.full(n, 0)
+    counts = [0, 0]
+    for i in range(n):
+        if is_nan(prices[i]):
+            continue
+        if abs(prices[i]) >= threshold:
+            if prices[i] < 0:
+                # Long
+                out[i] = 1
+                counts[0] += 1
+            else:
+                # Short
+                out[i] = -1
+                counts[1] += 1
+    return out, counts
+
+
+def detect_perfect_order(vector_long, vector_mid, vector_short, ignore_level):
+    n = len(vector_long)
+    out = np.full(n, 0)
+    for i, (l, m, s) in enumerate(zip(vector_long, vector_mid, vector_short)):
+        if is_nans([l, m, s]):
+            continue
+        d = (max([l, m, s]) - min([l, m, s])) / l * 100.0
+        if d < ignore_level:
+            continue
+        if s > m and m > l:
+            out[i] = 1
+        elif s < m and m < l:
+            out[i] = -1
+    return out                            
+        
 def detect_pivots_tick(timestamps, prices, slide_term_sec=60, center_sec=5):
     pivots = detect_pivot_points_tick(timestamps, prices, slide_term_sec, center_sec)
     pivot_times, pivot_prices, pivot_types = pivots
@@ -270,6 +302,7 @@ def extract_representative_pivots(pivot_times, pivot_prices, pivot_types, timest
     return reps_time, reps_price, reps_type
 
 
+# tickデータ用EMA計算
 def emas(timestamps, prices, period_fast_sec=30, period_mid_sec=60, period_slow_sec=900):
     alpha_fast = 1 / period_fast_sec
     alpha_mid = 1 / period_mid_sec
@@ -497,7 +530,39 @@ def slopes(vector, window):
         out[i] = m
     return out
 
+def detect_range(vector, window, height_max):
+    n = len(vector)
+    out = np.full(n, 0)
+    for i in range(window - 1, n):
+        d = vector[i - window + 1: i + 1]
+        height = max(d) - min(d)
+        if height <= height_max:
+            out[i] = 1
+    return out
 
+def detect_cross(short, long):
+    n = len(short)
+    out = np.full(n, 0)
+    if n <= 1:
+        return out
+    elif n == 2:
+        w = 1
+    else:
+        w = 2
+    for i in range(w, n):
+        if (short[i - w] <= long[i - w]) and (short[i] > long[i]):
+            out[i] = 1
+    return out
+
+
+def detect_near(vector1, vector2, threshold):
+    n = len(vector1)
+    out = np.full(n, 0)
+    for i in range(n):
+        if abs(vector1[i] - vector2[i]) < threshold:
+            out[i] = 1
+    return out
+    
 def majority_filter(vector, target_values, window, threshold=1.0):
     n = len(vector)
     out = np.full(n, 0)
@@ -514,3 +579,32 @@ def majority_filter(vector, target_values, window, threshold=1.0):
                 out[i] = target_value
                 continue
     return out
+
+
+def slice_greater(vector, threshold):
+    n = len(vector)
+    out = np.full(n, 0)
+    for i in range(n):
+        if vector[i] > threshold:
+            out[i] = 1
+        elif vector[i] < - threshold:
+            out[i] = -1
+    return out
+
+def detect_edge(vector, value):
+    n = len(vector)
+    active = False
+    edge = np.full(n, 0)
+    for i in range(n):
+        if active:
+            if vector[i] == 0:
+                edge[i] = -1
+                active = False
+        else:      
+            if i == 0 and vector[i] == value:
+                edge[i] = 1
+                active = True
+            elif vector[i - 1] == 0 and vector[i] == value:
+                edge[i] = 1
+                active = False
+    return edge
