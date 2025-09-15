@@ -186,7 +186,7 @@ def analyze(title, csv_path, graph_height):
     param.perfect_order_ignore_level = 0.01
     param.perfect_order_min_bars = 10
     param.atr_active = 0.02
-    param.max_retries = 7
+    param.max_retries = 20
     param.trend_slope_abs = 0.5
     param.trend_retrace_pct = 0.01  
 
@@ -207,11 +207,10 @@ def analyze(title, csv_path, graph_height):
     beans = Beans(param)
     beans.calc(dic)
     print('Elapsed Time: ', time.time() - t0)
-    #result = sparkle.simulate_trades()
-    #print(result)
     
-    return plot_chart(title, timestamps_np, beans, param.short_term, param.mid_term, param.long_term, graph_height)
-
+    fig = plot_chart(title, timestamps_np, beans, param.short_term, param.mid_term, param.long_term, graph_height)
+    df_result = beans.simulate_trades_from_signals()
+    return fig, df_result
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for signal, label, color in zip(signals, labels, colors):
@@ -290,6 +289,7 @@ def plot_chart(title, timestamp, beans:Beans, short_term, mid_term, long_term, g
 def main(symbol, graph_height):
     timeframe = 'M1'
     year = 2025
+    dfs = []
     for month in range(4, 10):
         mstr = str(month).zfill(2)
         files = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
@@ -297,11 +297,16 @@ def main(symbol, graph_height):
         for file in files:
             _, filename = os.path.split(file)
             name, _ = os.path.splitext(filename)
-            fig = analyze(f'{name}', file, graph_height)
+            fig, df = analyze(f'{name}', file, graph_height)
+            dfs.append(df)
             writer.add_fig(fig)
         os.makedirs(f'./Beans/{symbol}', exist_ok=True)
         path = f'./Beans/{symbol}/{symbol}_{year}_{mstr}.html'
         writer.write(path)
+        
+    df = pd.concat(dfs)
+    path = f'./Beans/{symbol}/{symbol}_trade_result.csv'
+    df.to_csv(path, index=False)
         
 def test():
     filepath = r"C:\Users\docs9\develop\github\TubeSound\DayTradeData\M1\NIKKEI\2025-06\NIKKEI_M1_2025-06-03-2.csv"
@@ -318,4 +323,4 @@ def loop():
     
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    test()
+    loop()

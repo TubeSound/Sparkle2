@@ -24,17 +24,15 @@ class BeansParam:
 
 
 class Beans:
-    STOP_LOSS = 1
-    TRAILING_STOP = 2
-    EMA_TOUCH = 3
-    GROWTH_FAIL = 4
-    OPPOSITE_PIVOT = 5
+    TECHNICAL_CLOSE = 2
+    STOP_LOSS = 2
+    TRAILING_STOP = 3
     
     LONG = 1
     SHORT = -1
     CLOSE = 2
     
-    reason = {STOP_LOSS:'SL', TRAILING_STOP: 'TRAIL', EMA_TOUCH: 'TOUCH', GROWTH_FAIL: 'FAIL', OPPOSITE_PIVOT: 'OPPST'}
+    reason = {TECHNICAL_CLOSE: 'TECH', STOP_LOSS:'SL', TRAILING_STOP: 'TRAIL'}
     
     
     
@@ -276,141 +274,112 @@ class Beans:
         return trend
 
                                       
-    def simulate_trades(
-            self,
-            touch_exit: bool = True,
-            k_sl: float = 1.2,
-            m_trail: float = 1.5,
-            T: int = 60,
-            r: float = 1.2,
-            fees_pct: float = 0.0,   # 片道/往復どちらでも。ここでは“往復”想定で1トレードごとに引く
-        ) -> pd.DataFrame:
-            price = np.asarray(self.cl, dtype=float)
-            mid   = np.asarray(self.mid, dtype=float)
-            pivot = np.asarray(self.pivot)
-            atrp  = np.asarray(self.atrp, dtype=float)   # %表現を想定
-            ts    = np.asarray(self.timestamp)
+    def simulate_trades_from_signals(   self,
+                                        k_sl: float = 1.2,           # ハードSL = k_sl * ATRP(entry)
+                                        use_trailing: bool = False,  # トレーリングを使うなら True
+                                        m_trail: float = 1.5,        # トレーリング幅 = m_trail * ATRP(entry)
+                                        fees_pct: float = 0.0,       # 往復コスト（%）
+                                    ) -> pd.DataFrame:
+    
+    
+        #前提：self.trade_signal が生成済み
+        #  - エントリー:  LONG(=1), SHORT(=-1)
+        #  - クローズ  :  LONG_CLOSE(=2), SHORT_CLOSE(=-2)
 
-            n = len(price)
-            position = 0   # 0/±1
-            entry_i = None
-            mfe_pct = 0.0  # Maximum Favorable Excursion in %
-            curr_id = 1
+        #退出条件の優先順位:
+        #  1) ハードSL（ATRP基準）
+        #  2) トレーリング（任意）
+        #  3) 信号によるクローズ（LONG_CLOSE/SHORT_CLOSE）
+        
 
-            # plot用
-            entries = np.zeros(n, dtype=int)
-            entry_dir = np.zeros(n, dtype=int)
-            exits  = np.zeros(n, dtype=int)
-            reason = np.zeros(n, dtype=int)
+        price = np.asarray(self.cl, dtype=float)
+        atrp  = np.asarray(self.atrp, dtype=float)          # % 表現
+        sig   = np.asarray(self.trade_signal, dtype=int)
+        ts    = np.asarray(self.timestamp)
 
-            rows = []
+        n = len(price)
+        position = 0                    # 0/±1
+        entry_i  = None
+        mfe_pct  = 0.0                  # Maximum Favorable Excursion
+        curr_id  = 1
 
-            # 差分（EMAタッチ判定で使う）
-            def crossed(prev, curr):  # 符号反転＝クロス
-                return (prev == 0) or (np.sign(prev) != np.sign(curr))
+        # 可視化用
+        entries    = np.zeros(n, dtype=int)
+        entry_dir  = np.zeros(n, dtype=int)
+        exits      = np.zeros(n, dtype=int)
+        exit_reason= np.zeros(n, dtype=int)
 
-            for i in range(n):
-                # ---- ENTRY（確定ピボットのみ）
-                if position == 0:
-                    if pivot[i] == -2:  # Buy
-                        position = self.LONG
-                        entry_i = i
-                        mfe_pct = 0.0
-                        entries[i] = curr_id
-                        entry_dir[i] = self.LONG
-                    elif pivot[i] ==  2:  # Sell
-                        position = self.SHORT
-                        entry_i = i
-                        mfe_pct = 0.0
-                        entries[i] = curr_id
-                        entry_dir[i] = self.SHORT
-                    continue
+        rows = []
 
-                # ---- 以降は建玉あり
-                ret = (price[i] - price[entry_i]) / price[entry_i]   # +:上昇率
-                fav_now = ret if position > 0 else -ret              # 有利方向の％
-                mfe_pct = max(mfe_pct, fav_now)
+        for i in range(n):
+            s = sig[i]
 
-                atrp0 = max(1e-8, atrp[entry_i] / 100.0)  # 0除算保険
+            # --- エントリー ---
+            if position == 0:
+                if s == self.LONG:
+                    position = self.LONG
+                    entry_i  = i
+                    mfe_pct  = 0.0
+                    entries[i] = curr_id
+                    entry_dir[i] = self.LONG
+                elif s == self.SHORT:
+                    position = self.SHORT
+                    entry_i  = i
+                    mfe_pct  = 0.0
+                    entries[i] = curr_id
+                    entry_dir[i] = self.SHORT
+                continue
 
-                # 1) ハードSL（ATRP基準）
-                if fav_now <= -k_sl * atrp0:
-                    pnl_pct = ret * position - fees_pct
-                    pnl_abs = (price[i] - price[entry_i]) * position
-                    exits[i], reason[i] = curr_id, self.STOP_LOSS
-                    rows.append((ts[entry_i], ts[i], curr_id, position,
-                                price[entry_i], price[i],
-                                pnl_pct, pnl_abs, mfe_pct, "STOP_LOSS"))
-                    position = 0; curr_id += 1
-                    continue  # 同バーで二重発火防止
+            # --- 建玉あり：損益とATRPを更新 ---
+            ret     = (price[i] - price[entry_i]) / price[entry_i]    # +:上昇率
+            fav_now = ret if position > 0 else -ret                   # 有利方向％
+            mfe_pct = max(mfe_pct, fav_now)
+            atrp0   = max(1e-8, atrp[entry_i] / 100.0)                # 0除算保険
 
-                # 2) トレイリング（ATRP基準）
+            # 1) ハードSL（ATRP基準）
+            if fav_now <= -k_sl * atrp0:
+                pnl_pct = ret * position - fees_pct
+                pnl_abs = (price[i] - price[entry_i]) * position
+                exits[i], exit_reason[i] = curr_id, self.STOP_LOSS
+                rows.append((ts[entry_i], ts[i], curr_id, position,
+                            price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, "STOP_LOSS"))
+                position = 0; curr_id += 1
+                continue
+
+            # 2) トレイリング（任意）
+            if use_trailing:
                 trail = m_trail * atrp0
                 if (mfe_pct - fav_now) >= trail:
                     pnl_pct = ret * position - fees_pct
                     pnl_abs = (price[i] - price[entry_i]) * position
-                    exits[i], reason[i] = curr_id, self.TRAILING_STOP
+                    exits[i], exit_reason[i] = curr_id, self.TRAILING_STOP
                     rows.append((ts[entry_i], ts[i], curr_id, position,
-                                price[entry_i], price[i],
-                                pnl_pct, pnl_abs, mfe_pct, "TRAILING_STOP"))
+                                price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, "TRAILING_STOP"))
                     position = 0; curr_id += 1
                     continue
 
-                # 3) EMA-Mid タッチ or クロス
-                if touch_exit:
-                    d_prev = (price[i-1] - mid[i-1]) if i > 0 else 0.0
-                    d_curr = (price[i]   - mid[i])
-                    touched = abs(d_curr) / max(1e-8, price[i]) < 1e-4
-                    if touched or crossed(d_prev, d_curr):
-                        pnl_pct = ret * position - fees_pct
-                        pnl_abs = (price[i] - price[entry_i]) * position
-                        exits[i], reason[i] = curr_id, self.EMA_TOUCH
-                        rows.append((ts[entry_i], ts[i], curr_id, position,
-                                    price[entry_i], price[i],
-                                    pnl_pct, pnl_abs, mfe_pct, "EMA_TOUCH"))
-                        position = 0; curr_id += 1
-                        continue
+            # 3) 信号によるクローズ
+            if (position == self.LONG and s == self.CLOSE) or \
+            (position == self.SHORT and s == self.CLOSE):
+                pnl_pct = ret * position - fees_pct
+                pnl_abs = (price[i] - price[entry_i]) * position
+                exits[i], exit_reason[i] = curr_id, self.TECHNICAL_CLOSE
+                rows.append((ts[entry_i], ts[i], curr_id, position,
+                            price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, self.reason[self.TECHNICAL_CLOSE]))
+                position = 0; curr_id += 1
+                continue
 
-                # 4) 成長不全（T本）
-                if (i - entry_i) >= T:
-                    depth0 = abs(self.mid_long_diff_pct[entry_i])
-                    grown  = abs(self.mid_long_diff_pct[i]) >= r * depth0
-                    slope_ok = (mid[i] - mid[i-1]) > 0 if position > 0 else (mid[i] - mid[i-1]) < 0
-                    if not (grown and slope_ok):
-                        pnl_pct = ret * position - fees_pct
-                        pnl_abs = (price[i] - price[entry_i]) * position
-                        exits[i], reason[i] = curr_id, self.GROWTH_FAIL
-                        rows.append((ts[entry_i], ts[i], curr_id, position,
-                                    price[entry_i], price[i],
-                                    pnl_pct, pnl_abs, mfe_pct, "GROWTH_FAIL"))
-                        position = 0; curr_id += 1
-                        continue
+        # 可視化用に保持
+        self.entry_direction = entry_dir
+        self.exit_reason     = exit_reason
 
-                # 5) 逆ピボット
-                if (position > 0 and pivot[i] == 2) or (position < 0 and pivot[i] == -2):
-                    pnl_pct = ret * position - fees_pct
-                    pnl_abs = (price[i] - price[entry_i]) * position
-                    exits[i], reason[i] = curr_id, self.OPPOSITE_PIVOT
-                    rows.append((ts[entry_i], ts[i], curr_id, position,
-                                price[entry_i], price[i],
-                                pnl_pct, pnl_abs, mfe_pct, "OPPOSITE_PIVOT"))
-                    position = 0; curr_id += 1
-                    continue
-
-            # 可視化用
-            #self.entries = entries
-            self.entry_direction = entry_dir
-            #self.exits = exits
-            self.exit_reason = reason
-
-            if not rows:
-                return pd.DataFrame(columns=[
-                    "entry_time","exit_time","id","side",
-                    "entry_px","exit_px","pnl_pct","pnl_abs","mfe_pct","exit_reason"
-                ])
-
-            df = pd.DataFrame(rows, columns=[
+        if not rows:
+            return pd.DataFrame(columns=[
                 "entry_time","exit_time","id","side",
                 "entry_px","exit_px","pnl_pct","pnl_abs","mfe_pct","exit_reason"
             ])
-            return df
+
+        return pd.DataFrame(rows, columns=[
+            "entry_time","exit_time","id","side",
+            "entry_px","exit_px","pnl_pct","pnl_abs","mfe_pct","exit_reason"
+        ])
