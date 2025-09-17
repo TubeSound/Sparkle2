@@ -4,7 +4,9 @@ import os
 import glob
 import pandas as pd
 import numpy as np
+from random import randint, random
 import time
+import itertools
 from decimal import Decimal, ROUND_FLOOR
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -18,6 +20,10 @@ from html_writer import HtmlWriter
 
 from cypress import Cypress, CypressParam
 
+
+def makeFig(rows, cols, size):
+    fig, ax = plt.subplots(rows, cols, figsize=(size[0], size[1]))
+    return (fig, ax)
 
 def gridFig(row_rate, size):
     rows = sum(row_rate)
@@ -87,83 +93,6 @@ def draw_bar(ax, timestamps, signal):
         elif signal[i] == -1: 
             ax.axvspan(t0, t1, color='red', alpha=0.1)
 
-def draw_bar_level(ax, timestamps, signal, level):
-    n = len(signal)
-    sign = np.full(n, 0)
-    for i in range(n):
-        if signal[i] >= level:
-            sign[i] = 1
-        elif signal[i] <= -level:
-            sign[i] = -1
-    draw_bar(ax, timestamps, sign)
-            
-def plot_signals(ax, signals):
-    for signal in signals:
-        typ, entry_time, entry_price, exit_time, exit_price = signal
-        color = 'green' if typ == 1 else 'red'
-        ax.plot([entry_time, exit_time], [entry_price, exit_price], color=color, linewidth=2, linestyle='--')
-        ax.scatter(entry_time, entry_price, color=color, marker='^' if typ == 1 else 'v', s=100, label=f'{typ}_entry')
-        ax.scatter(exit_time, exit_price, color=color, marker='x', s=100, label=f'{typ}_exit')
-
-def plot_markers(ax, ax2, cypress:Cypress):
-    timestamp = cypress.timestamp
-    cl = cypress.cl
-    values = sparkle.mid_long_diff_pct
-    entry = sparkle.entry_direction
-    ext = sparkle.exit_reason
-    pivot = sparkle.pivot
-    n = len(entry)
-    label_written0 = False
-    label_written1 = False
-    for i in range(n):
-        if pivot[i] == 1:
-            a = ax2
-            v = values
-            marker='o'
-            color='red'
-            alpha=0.3
-            s=50
-        elif pivot[i] == -1:
-            a = ax2
-            v = values
-            marker='o'
-            color='green'
-            alpha=0.3
-            s=50
-        elif entry[i] == Sparkle2.SHORT:
-            a = ax
-            v = cl
-            marker='v'
-            color='red'
-            alpha=0.4
-            s=100
-            label='Sell'
-        elif entry[i] == Sparkle2.LONG:
-            a = ax
-            v = cl
-            marker='^'
-            color='green'
-            alpha=0.4
-            s=100 
-            label='Buy'   
-        elif ext[i] > 0:
-            a = ax
-            marker='x'
-            color='gray'
-            alpha=0.6
-            s=200
-            text = Sparkle2.reason[ext[i]]
-            a.text(timestamp[i], cl[i], text)
-        else:
-            continue
-        if not label_written0 and entry[i] == Sparkle2.LONG:
-            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
-            label_written0 = True
-        elif not label_written1 and entry[i] == Sparkle2.SHORT:    
-            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
-            label_written1 = True
-        else:
-            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s)
 
 def round_number(x: float, step: float) -> float:
     """xをstep刻みの“下方向”キリ番に揃える"""
@@ -172,15 +101,25 @@ def round_number(x: float, step: float) -> float:
     q  = (dx / ds).to_integral_value(rounding=ROUND_FLOOR)
     return float(q * ds)
 
+def rand_step(begin, end, step):
+    l = end - begin
+    n = int(l / step + 0.5) + 1
+    while True:
+        r = randint(0, n)
+        v = begin + r * step
+        if v <= end:
+            return v
 
-def analyze(title, csv_path, graph_height):
+def backtest(title, csv_path, tp, sl, graph_height):
     param = CypressParam()
     param.long_term = 50
     param.mid_term=  25
     param.short_term = 13
-    param.atr_term = 25
-    param.trend_slope_abs = 0.5
-    param.trend_retrace_pct = 0.01  
+    param.atr_term = 20
+    param.trend_slope_th = 1.0
+    param.sl = 50
+    param.tp = 20  
+    
 
     df = read_data(csv_path)
     #df = df0.iloc[:60 * 2]
@@ -201,8 +140,89 @@ def analyze(title, csv_path, graph_height):
     print('Elapsed Time: ', time.time() - t0)
     
     fig = plot_chart(title, timestamps_np, cypress, param.short_term, param.mid_term, param.long_term, graph_height)
-    #df_result = cypress.simulate_trades_from_signals()
-    return fig #, df_result
+    df_result = cypress.simulate_scalping_pips_multi(tp, sl)
+    return fig , df_result
+
+
+
+
+def market_data_files(symbol):
+    timeframe = 'M1'
+    year = 2025
+    files = []
+    for month in range(4, 10):
+        mstr = str(month).zfill(2)
+        fs = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
+        files += fs
+    return files 
+
+def read_data_as_dic(csv_path):
+    df = read_data(csv_path)
+    timestamps_np = df['jst'].tolist()
+    timestamps = df["jst"].values
+    op = df[Columns.OPEN].to_numpy()
+    hi = df[Columns.HIGH].to_numpy()
+    lo = df[Columns.LOW].to_numpy()
+    cl = df[Columns.CLOSE].to_numpy()
+    dic = {Columns.JST: timestamps_np, Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
+    return dic
+
+def set_param(symbol, param):
+    param.short_term = rand_step(12, 30, 2)
+    param.long_term = rand_step(40, 100, 20)
+    param.trend_slope_th = rand_step(0.5, 5, 0.5)
+    param.tp = rand_step(10, 300, 10)
+    param.sl = rand_step(10, 300, 10)
+        
+
+def optimizer(symbol, save_dir, repeat=2000):
+    dir_path = os.path.join(save_dir, 'Optimize')
+    os.makedirs(dir_path, exist_ok=True)
+    files = market_data_files(symbol)
+    
+    i = 0
+    result = []
+    #for short_term, long_term, th, sl, tp in itertools.product(short_terms, long_terms, ths, sls, tps):
+    for _ in range(repeat):                   
+        param = CypressParam()
+        set_param(symbol, param)
+        if param.long_term < param.short_term:
+            continue   
+ 
+        cypress = Cypress(param)
+        rows = []
+        columns = []
+        for file in files:
+            dic = read_data_as_dic(file)
+            cypress.calc(dic)
+            r, columns = cypress.simulate_scalping_pips_multi()
+            if len(r) > 0:
+                rows += r
+        df = pd.DataFrame(data=rows, columns=columns)
+        if len(df) < 10:
+            continue
+        metric = performance(df)
+        if metric['profit'] > 2000:
+            save_profit_graph(symbol, str(i).zfill(3), df, dir_path)
+        d1 = param.to_dict()
+        d0 = {'i': i}
+        d = dict(**d0, **d1)
+        dic = dict(**d, **metric)
+        result.append(dic)
+        i += 1
+    
+    keys = result[0].keys()
+    dic = {}
+    for key in keys:
+        array = []
+        for d in result:
+            array.append(d[key])
+        dic[key] = array
+    df_result = pd.DataFrame(dic)
+    df_result = df_result.sort_values('profit', ascending=False)
+    df_result.to_excel(os.path.join(dir_path, f'{symbol}_optimize.xlsx'), index=False)
+    
+    
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for signal, label, color in zip(signals, labels, colors):
@@ -237,19 +257,26 @@ def plot_signal_marker(ax, timestamp, signal, values):
         ax.scatter(timestamp[i], values[i], marker=marker, color=color, alpha=alpha, s=100)
     
 def plot_chart(title, timestamp, cypress:Cypress, short_term, mid_term, long_term, graph_height):
-    fig, axes = gridFig([7, 1, 2], (18, 12))
+    fig, axes = gridFig([7, 1, 2, 2], (18, 12))
     timestamp = cypress.timestamp
     colors = ['gray', 'red', 'green', 'blue']
     labels = ['Close', f'EMA({short_term})-Short', f'EMA({mid_term})-Mid', f'EMA({long_term})-Long']
     plot_prices(axes[0], timestamp, [cypress.cl, cypress.ema_short, cypress.ema_mid, cypress.ema_long], colors, labels, graph_height)
    
-    axes[1].plot(timestamp, cypress.signal, color='blue', label='Trade Signal')
-    plot_signal_marker(axes[0], timestamp, cypress.signal, cypress.cl)
+    axes[1].plot(timestamp, cypress.entries, color='blue', label='Trade Signal')
+    plot_signal_marker(axes[0], timestamp, cypress.entries, cypress.cl)
+    plot_signal_marker(axes[0], timestamp, cypress.exits, cypress.cl)
+    
     
     cypress.long_slope[0] = 0.0
     axes[2].plot(timestamp, cypress.long_slope, color='blue', label='EMA-Long slope') 
+    axes[2].axhline(y=0)
     draw_bar(axes[2], timestamp, cypress.trend)
+    axes[2].set_ylim(-4, 4)
 
+    cypress.atrp[0] = 0.0
+    axes[3].plot(timestamp, cypress.atrp, color='red', label='ATRP') 
+    axes[3].axhline(y=0)
 
     
     t0 = timestamp[0]
@@ -263,8 +290,46 @@ def plot_chart(title, timestamp, cypress:Cypress, short_term, mid_term, long_ter
     #plt.tight_layout()
     plt.close()
     return fig
+
+def performance(df_original):
+    # df: simulate_scalping_pips_multi の戻り（profitは価格差）
+    df = df_original.copy()
+    df["pnl"] = df["profit"]  # 必要なら /pip_size でpips化
+    df["cum"] = df["pnl"].cumsum()
+    roll_max = df["cum"].cummax()
+    dd = df["cum"] - roll_max
+    out = {
+        "trades": len(df),
+        "win_rate": (df["pnl"] > 0).mean(),
+        "profit_mean": df["pnl"].mean(),
+        "profit_median": df["pnl"].median(),
+        "drawdown_min": dd.min(),
+        "profit": df["cum"].iloc[-1] if len(df) else 0.0,
+    }
+    return out
+
+def save_result(symbol, title, df, dir_path):
+    profits = df['profit'].to_numpy()
+    accum = np.cumsum(profits)
+    df['profit_accum'] = accum
+    csv_path = os.path.join(dir_path, f'{symbol}_{title}_trade_result.csv')
+    df.to_csv(csv_path, index=False)
+
+def save_profit_graph(symbol, title, df, dir_path):
+    profits = df['profit'].to_numpy()
+    accum = np.cumsum(profits)
+    df['profit_accum'] = accum
+    fig, ax = makeFig(1, 1, (10, 5))
+    time = df['time_entry']
+    ax.plot(time, df['profit_accum'], color='blue')
+    title = f"{title} {symbol} Scalping Profit Curve"
+    ax.set_title(title)
+    path = os.path.join(dir_path, f"{title}_{symbol}_profit_curve.png")
+    fig.savefig(path)
+    plt.close()
     
-def main(symbol, graph_height):
+       
+def main(symbol, tp, sl, graph_height):
     timeframe = 'M1'
     year = 2025
     dfs = []
@@ -275,30 +340,42 @@ def main(symbol, graph_height):
         for file in files:
             _, filename = os.path.split(file)
             name, _ = os.path.splitext(filename)
-            fig = analyze(f'{name}', file, graph_height)
-            #dfs.append(df)
+            fig, df = backtest(f'{name}', file,  tp, sl, graph_height)
+            dfs.append(df)
             writer.add_fig(fig)
-        os.makedirs(f'./Cypress/{symbol}', exist_ok=True)
-        path = f'./Cypress/{symbol}/{symbol}_{year}_{mstr}.html'
+        dir_path = f'./Cypress/Scalping/{symbol}'
+        os.makedirs(dir_path, exist_ok=True)
+        path = f'./Cypress/Scalping/{symbol}/{symbol}_{year}_{mstr}.html'
         writer.write(path)
         
-    #df = pd.concat(dfs)
-    #path = f'./Cypress/{symbol}/{symbol}_trade_result.csv'
-    #df.to_csv(path, index=False)
+    df = pd.concat(dfs)
+    save_result(symbol, '#0', df, dir_path)
+
         
 def test():
-    filepath = r"C:\Users\docs9\develop\github\TubeSound\DayTradeData\M1\NIKKEI\2025-06\NIKKEI_M1_2025-06-03-2.csv"
-    analyze('test', filepath, 400)
+    optimizer('NSDQ', './Cypress/Optimize/NSDQ')
 
 def loop():
     symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
-    heights = [300, 400, 400, 5, 4]
+    heights = [300, 400, 400, 50, 4]
     #heights = [None, None, None, None, None]
+
+        
     for symbol, height in zip(symbols, heights):
-        main(symbol, height)    
+        if symbol == 'XAUUSD':
+            sl = 5
+            tp = 5
+        elif symbol == 'USDJPY':
+            sl = 0.01
+            tp = 0.01
+        else:
+            sl = 50
+            tp = 20
+        main(symbol,  tp, sl, height)    
     
     
     
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    loop()
+    #loop()
+    test()

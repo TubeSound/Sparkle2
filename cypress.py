@@ -7,10 +7,22 @@ class CypressParam:
     long_term = 50
     mid_term = 25
     short_term = 13
+    trend_slope_th = 0.2
     atr_term = 20
+    sl = 20
+    tp = 20
 
-    trend_slope_threshold = 0.2
-
+    def to_dict(self):
+        dic = {
+                'long_term': self.long_term,
+                'mid_term': self.mid_term,
+                'short_term': self.short_term,
+                'trend_slope_th': self.trend_slope_th,
+                'atr_term': self.atr_term,
+                'sl': self.sl,
+                'tp': self.tp
+               }
+        return dic
 
 class Cypress:
     TECHNICAL_CLOSE = 2
@@ -121,129 +133,227 @@ class Cypress:
         self.mid_slope = mid_slope
         self.long_slope = long_slope
         
-        self.trend = self.detect_trend(long_slope, self.param.trend_slope_threshold)
+        self.trend = self.detect_trend(long_slope, self.param.trend_slope_th)
         
-        self.signal = self.detect_signal()
+        self.entries, self.exits = self.detect_signals()
     
-    def detect_signal(self):
+    def detect_signals(self):
         n = len(self.cl)
-        signal = np.full(n, 0)
+        entries = np.full(n, 0)
+        exits = np.full(n, 0)
+        state = 0
+        last_price = 0
         for i in range(1, n):
-            if self.trend[i] == 1:
+            if self.trend[i] == -1:
                 if self.cl[i - 1] <= self.ema_short[i - 1] and self.cl[i] >= self.ema_short[i]:
-                    signal[i] = self.SHORT 
-            elif self.trend[i] == -1:
+                    # Short
+                    if state == 0:
+                        entries[i] = self.SHORT
+                        last_price = self.cl[i]
+                        state = self.SHORT
+                    elif state == self.SHORT:                    
+                        if last_price >= self.cl[i]: 
+                            entries[i] = self.SHORT
+                            last_price = self.cl[i]
+                            state = self.SHORT 
+                        else:
+                            exits[i] = self.CLOSE
+                            state = 0
+                    elif state == self.LONG:
+                        entries[i] = self.SHORT
+                        exits[i] = self.CLOSE
+                        last_price = self.cl[i]
+                        state = self.SHORT                           
+            elif self.trend[i] == 1:
                 if self.cl[i - 1] >= self.ema_short[i - 1] and self.cl[i] <= self.ema_short[i]:
-                    signal[i] = self.LONG                
-        return signal
+                    # Long
+                    if state == 0:
+                        entries[i] = self.LONG
+                        last_price = self.cl[i]
+                        state = self.LONG
+                    elif state == self.LONG:
+                        if last_price <= self.cl[i]:
+                            entries[i] = self.LONG
+                            last_price = self.cl[i]
+                            state = self.LONG
+                        else:
+                            exits[i] = self.CLOSE
+                            state = 0
+                    elif state == self.SHORT:
+                        entries[i] = self.LONG
+                        exits[i] = self.CLOSE
+                        last_price = self.cl[i]
+                        state = self.LONG
+        return entries, exits
 
                                       
-    def simulate_trades_from_signals(   self,
-                                        k_sl: float = 1.2,           # ハードSL = k_sl * ATRP(entry)
-                                        use_trailing: bool = False,  # トレーリングを使うなら True
-                                        m_trail: float = 1.5,        # トレーリング幅 = m_trail * ATRP(entry)
-                                        fees_pct: float = 0.0,       # 往復コスト（%）
-                                    ) -> pd.DataFrame:
     
-    
-        #前提：self.trade_signal が生成済み
-        #  - エントリー:  LONG(=1), SHORT(=-1)
-        #  - クローズ  :  LONG_CLOSE(=2), SHORT_CLOSE(=-2)
+    # ── 汎用：シンボル→pip_size 解決（必要なら外部から渡してもOK）
+    def resolve_pip_size(self, symbol: str) -> float:
+        """
+        代表例:
+        - USDJPY, EURJPY など: 0.01
+        - XAUUSD: 0.1  (ブローカー定義に合わせて調整)
+        - 日経225/ダウ/ナスダックなど指数CFD: 1.0（=1ポイント）
+        """
+        s = symbol.upper()
+        if s.endswith("JPY"): return 0.01
+        if s in ("XAUUSD","GOLD","XAU"): return 0.1
+        if s in ("NIKKEI","JP225","US30","US100","DOW","NSDQ","NAS100"): return 1.0
+        # FXの多く: 小数第4位 ＝ 0.0001
+        return 0.0001
 
-        #退出条件の優先順位:
-        #  1) ハードSL（ATRP基準）
-        #  2) トレーリング（任意）
-        #  3) 信号によるクローズ（LONG_CLOSE/SHORT_CLOSE）
-        
 
-        price = np.asarray(self.cl, dtype=float)
-        atrp  = np.asarray(self.atrp, dtype=float)          # % 表現
-        sig   = np.asarray(self.trade_signal, dtype=int)
-        ts    = np.asarray(self.timestamp)
+    def _append_row(self, rows, ts, entry_i, i, trade_id, side, price, fees_pips, pip_size, reason):
+        diff = (price[i] - price[entry_i]) * (1 if side > 0 else -1)
+        pnl_pips = (diff / pip_size) - fees_pips
+        rows.append((
+            ts[entry_i], ts[i], trade_id, side,
+            float(price[entry_i]), float(price[i]),
+            float(pnl_pips), reason
+        ))
 
-        n = len(price)
-        position = 0                    # 0/±1
-        entry_i  = None
-        mfe_pct  = 0.0                  # Maximum Favorable Excursion
-        curr_id  = 1
 
-        # 可視化用
-        entries    = np.zeros(n, dtype=int)
-        entry_dir  = np.zeros(n, dtype=int)
-        exits      = np.zeros(n, dtype=int)
-        exit_reason= np.zeros(n, dtype=int)
+    def simulate_scalping_pips_multi(
+        self,
+        priority: str = "TP_FIRST",        # "SL_FIRST" or "TP_FIRST"
+        check_from_next_bar: bool = True,  # True: エントリーバーは判定しない
+    ):
+        """
+        スキャルピング（pips≒価格差固定・複数ポジション可）
+        - entries の 1/-1 を見るたびに新規建て
+        - 各ポジション独立に High/Low 到達で TP/SL
+        - 両到達の同時判定は priority で制御（既定: SL優先）
+        - 価格は“ポイント差”で扱う（必要なら呼び出し側で pip_size を掛けて渡す）
+        """
+        cl = np.asarray(self.cl, dtype=float)
+        hi = np.asarray(self.hi, dtype=float)
+        lo = np.asarray(self.lo, dtype=float)
+        sig = np.asarray(self.entries, dtype=int)
+        ts  = np.asarray(self.timestamp)
 
         rows = []
+        positions = []  # {id, side, entry_i}
+        tid = 1
+        n = len(cl)
 
+        for i in range(n):
+            to_close = []
+
+            # 1) 既存ポジションの TP/SL 判定（High/Low 使用）
+            for pos in positions:
+                i0   = pos["entry_i"]
+                side = pos["side"]
+                ep   = cl[i0]
+
+                # ルックアヘッド回避：次バー以降のみ判定
+                if check_from_next_bar and i <= i0:
+                    continue
+
+                if side == self.LONG:
+                    tp = ep + self.param.tp
+                    sl = ep - self.param.sl
+                    hit_tp = (hi[i] >= tp)
+                    hit_sl = (lo[i] <= sl)
+                    reason = None
+                    ex_px  = None
+
+                    if hit_tp and hit_sl:
+                        if priority == "TP_FIRST":
+                            reason, ex_px = "TP", tp
+                        else:  # "SL_FIRST"
+                            reason, ex_px = "SL", sl
+                    elif hit_tp:
+                        reason, ex_px = "TP", tp
+                    elif hit_sl:
+                        reason, ex_px = "SL", sl
+
+                    if reason is not None:
+                        pnl = (ex_px - ep)  # long
+                        rows.append((ts[i0], ts[i], pos["id"], side, float(ep), float(ex_px), float(pnl), reason))
+                        to_close.append(pos)
+
+                else:  # SHORT
+                    tp = ep - self.param.tp
+                    sl = ep + self.param.sl
+                    hit_tp = (lo[i] <= tp)
+                    hit_sl = (hi[i] >= sl)
+                    reason = None
+                    ex_px  = None
+
+                    if hit_tp and hit_sl:
+                        if priority == "TP_FIRST":
+                            reason, ex_px = "TP", tp
+                        else:
+                            reason, ex_px = "SL", sl
+                    elif hit_tp:
+                        reason, ex_px = "TP", tp
+                    elif hit_sl:
+                        reason, ex_px = "SL", sl
+
+                    if reason is not None:
+                        pnl = (ep - ex_px)  # short
+                        rows + [ts[i0], ts[i], pos["id"], side, float(ep), float(ex_px), float(pnl), reason]
+                        to_close.append(pos)
+
+            if to_close:
+                positions = [p for p in positions if p not in to_close]
+
+            # 2) 新規エントリー（複数可）
+            if sig[i] == self.LONG or sig[i] == self.SHORT:
+                positions.append({"id": tid, "side": sig[i], "entry_i": i})
+                tid += 1
+
+        return rows, ["time_entry","time_exit","id","side","price_entry","price_exit","profit","reason"]
+
+    def simulate_doten_pips(
+        self,
+        sl_pips: float = 15.0,
+        pip_size: float = 0.01,
+        fees_pips: float = 0.0,
+    ):
+        """
+        ドテン（常に1方向のみ保持）
+        - 反対シグナルで“必ず”クローズ→即ドテン
+        - 損切りは pips 基準
+        """
+        price = np.asarray(self.cl, dtype=float)
+        sig   = np.asarray(self.entries, dtype=int)  # entriesを“エントリー信号”として扱う
+        ts    = np.asarray(self.timestamp)
+
+        rows = []
+        side = 0
+        entry_i = None
+        trade_id = 1
+
+        n = len(price)
         for i in range(n):
             s = sig[i]
 
-            # --- エントリー ---
-            if position == 0:
-                if s == self.LONG:
-                    position = self.LONG
-                    entry_i  = i
-                    mfe_pct  = 0.0
-                    entries[i] = curr_id
-                    entry_dir[i] = self.LONG
-                elif s == self.SHORT:
-                    position = self.SHORT
-                    entry_i  = i
-                    mfe_pct  = 0.0
-                    entries[i] = curr_id
-                    entry_dir[i] = self.SHORT
+            # 建玉ありなら SL 判定
+            if side != 0:
+                diff = (price[i] - price[entry_i]) * (1 if side > 0 else -1)
+                diff_pips = diff / pip_size
+                if diff_pips <= -sl_pips:
+                    self._append_row(rows, ts, entry_i, i, trade_id, side, price, fees_pips, pip_size, "SL")
+                    side = 0
+                    trade_id += 1
+
+            # 反対信号でドテン
+            if (side == self.LONG and s == self.SHORT) or (side == self.SHORT and s == self.LONG):
+                # まずクローズ
+                self._append_row(rows, ts, entry_i, i, trade_id, side, price, fees_pips, pip_size, "REVERSE")
+                trade_id += 1
+                # 即ドテン
+                side = s
+                entry_i = i
                 continue
 
-            # --- 建玉あり：損益とATRPを更新 ---
-            ret     = (price[i] - price[entry_i]) / price[entry_i]    # +:上昇率
-            fav_now = ret if position > 0 else -ret                   # 有利方向％
-            mfe_pct = max(mfe_pct, fav_now)
-            atrp0   = max(1e-8, atrp[entry_i] / 100.0)                # 0除算保険
-
-            # 1) ハードSL（ATRP基準）
-            if fav_now <= -k_sl * atrp0:
-                pnl_pct = ret * position - fees_pct
-                pnl_abs = (price[i] - price[entry_i]) * position
-                exits[i], exit_reason[i] = curr_id, self.STOP_LOSS
-                rows.append((ts[entry_i], ts[i], curr_id, position,
-                            price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, "STOP_LOSS"))
-                position = 0; curr_id += 1
-                continue
-
-            # 2) トレイリング（任意）
-            if use_trailing:
-                trail = m_trail * atrp0
-                if (mfe_pct - fav_now) >= trail:
-                    pnl_pct = ret * position - fees_pct
-                    pnl_abs = (price[i] - price[entry_i]) * position
-                    exits[i], exit_reason[i] = curr_id, self.TRAILING_STOP
-                    rows.append((ts[entry_i], ts[i], curr_id, position,
-                                price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, "TRAILING_STOP"))
-                    position = 0; curr_id += 1
-                    continue
-
-            # 3) 信号によるクローズ
-            if (position == self.LONG and s == self.CLOSE) or \
-            (position == self.SHORT and s == self.CLOSE):
-                pnl_pct = ret * position - fees_pct
-                pnl_abs = (price[i] - price[entry_i]) * position
-                exits[i], exit_reason[i] = curr_id, self.TECHNICAL_CLOSE
-                rows.append((ts[entry_i], ts[i], curr_id, position,
-                            price[entry_i], price[i], pnl_pct, pnl_abs, mfe_pct, self.reason[self.TECHNICAL_CLOSE]))
-                position = 0; curr_id += 1
-                continue
-
-        # 可視化用に保持
-        self.entry_direction = entry_dir
-        self.exit_reason     = exit_reason
-
-        if not rows:
-            return pd.DataFrame(columns=[
-                "entry_time","exit_time","id","side",
-                "entry_px","exit_px","pnl_pct","pnl_abs","mfe_pct","exit_reason"
-            ])
+            # 0→新規
+            if side == 0 and (s == self.LONG or s == self.SHORT):
+                side = s
+                entry_i = i
 
         return pd.DataFrame(rows, columns=[
-            "entry_time","exit_time","id","side",
-            "entry_px","exit_px","pnl_pct","pnl_abs","mfe_pct","exit_reason"
+            "entry_time","exit_time","id","side","entry_px","exit_px","pnl_pips","exit_reason"
         ])

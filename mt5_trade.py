@@ -76,19 +76,17 @@ def position_dic_array(positions):
     return array
 
 class PositionInfo:
-    def __init__(self, symbol, typ, index: int, time: datetime, volume, ticket, price, sl, tp, target_profit=0):
+    def __init__(self, symbol, typ, time: datetime, volume, ticket, price, sl, tp, target_profit=0):
         self.symbol = symbol
         self.type = typ
         self.volume = volume
         self.ticket = ticket
-        self.entry_index = index
         self.entry_time = time
         self.entry_price = price
         self.sl = sl
         self.tp = tp
         self.target_profit = target_profit
 
-        self.exit_index = None
         self.exit_time = None       
         self.exit_price = None
         self.profit = None
@@ -165,7 +163,7 @@ class Mt5Trade:
     def set_symbol(self, symbol):
         self.symbol = symbol
         
-    def parse_order_result(self, result, index: int, time: datetime, stoploss, takeprofit):
+    def parse_order_result(self, result, time: datetime, stoploss, takeprofit):
         if result is None:
             print('Error')
             return False, None
@@ -175,7 +173,7 @@ class Mt5Trade:
         code = result.retcode
         if code == 10009:
             #print("注文完了", self.symbol, 'type', result.request.type, 'volume', result.volume)
-            position_info = PositionInfo(self.symbol, result.request.type, index, time, result.volume, result.order, result.price, stoploss, takeprofit)
+            position_info = PositionInfo(self.symbol, result.request.type, time, result.volume, result.order, result.price, stoploss, takeprofit)
             return True, position_info
         elif code == 10013:
             print("無効なリクエスト")
@@ -199,7 +197,7 @@ class Mt5Trade:
         else:
             return None
         
-    def entry(self, signal: Signal, index: int, time: datetime, volume:float, stoploss=None, takeprofit=0, deviation=20):        
+    def entry(self, signal: Signal, time: datetime, volume:float, stoploss=None, takeprofit=0, deviation=20):        
         point = mt5api.symbol_info(self.symbol).point
         price = self.current_price(signal)
         if signal == Signal.LONG:
@@ -235,7 +233,7 @@ class Mt5Trade:
                 request['tp'] = float(price - takeprofit)
         result = mt5api.order_send(request)
         #print('エントリー ', request)
-        return self.parse_order_result(result, index, time, stoploss, takeprofit)
+        return self.parse_order_result(result, time, stoploss, takeprofit)
     
     def get_positions(self):
         positions = mt5api.positions_get(symbol=self.symbol)

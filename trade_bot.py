@@ -12,13 +12,15 @@ from datetime import datetime, timedelta, timezone
 from mt5_trade import Mt5Trade, Columns, PositionInfo
 import sched
 
-from candle_chart import CandleChart
+
 from data_buffer import DataBuffer
 from time_utils import TimeUtils
 from utils import Utils
 from strategy import Simulation
 from common import Signal, Indicators
-from dashboard_market import calc_indicators
+
+from cypress import Cypress, CypressParam
+
 
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')  
@@ -32,11 +34,6 @@ logging.basicConfig(
     format="[%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %I:%M:%S %p"
 )
-
-#最初に取得するデータ長
-INITIAL_DATA_LENGTH = 500
-#指標計算後のバッファデータ長
-BUFFER_DATA_LENGTH = 300
 
 # -----
 
@@ -129,27 +126,30 @@ class TradeManager:
             
       
 class TradeBot:
-    def __init__(self, symbol:str,
-                 timeframe:str,
-                 interval_seconds:int,
-                 entry_column: str,
-                 exit_column:str, 
-                 technical_param: dict,
-                 trade_param:dict,
-                 simulate=False):
+    def __init__(self, symbol:str, param:dict):
         self.symbol = symbol
-        self.timeframe = timeframe
-        self.invterval_seconds = interval_seconds
-        self.entry_column = entry_column
-        self.exit_column = exit_column
-        self.technical_param = technical_param
-        self.trade_param = trade_param
-        if not simulate:
-            mt5 = Mt5Trade() 
-            mt5.set_symbol(symbol)
-            self.mt5 = mt5
+        self.timeframe = 'M1'
+        self.data_length = 60 * 8
+        self.invterval_seconds = 10
+        self.param = param
+        self.cypress = self.build_cypress(param)
+        mt5 = Mt5Trade() 
+        mt5.set_symbol(symbol)
+        self.last_time = None
+        self.mt5 = mt5
         self.delta_hour_from_gmt = None
         self.server_timezone = None
+        
+    def build_cypress(self, param: dict):
+        p = CypressParam()
+        p.short_term = param['short_term']
+        p.long_term = param['long_term']
+        p.trend_slope_th = param['trend_slope_th']
+        p.sl = param['sl']
+        p.tp = param['tp']        
+        cypress = Cypress(p)
+        return cypress
+        
         
     def debug_print(self, *args):
         utc = utcnow()
@@ -190,61 +190,53 @@ class TradeBot:
         with open(path, 'wb') as f:
             pickle.dump(self.trade_manager, f)     
             
+    def df2dic(self, df):
+        jst = df[Columns.JST].to_numpy()
+        op = df[Columns.OPEN].to_numpy()
+        hi = df[Columns.HIGH].to_numpy()
+        lo = df[Columns.LOW].to_numpy()
+        cl = df[Columns.CLOSE].to_numpy()
+        dic = {Columns.JST: jst, Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
+        return dic    
+            
     def run(self):
-        self.load_trade_manager()
-        df = self.mt5.get_rates(self.symbol, self.timeframe, INITIAL_DATA_LENGTH)
-        if len(df) < INITIAL_DATA_LENGTH:
+        df = self.mt5.get_rates(self.symbol, self.timeframe, self.data_length)
+        if len(df) < self.data_length:
             raise Exception('Error in initial data loading')
         if is_market_open(self.mt5, self.server_timezone):
-            # last data is invalid
-            df = df.iloc[:-1, :]
-            buffer = DataBuffer(self.symbol, self.timeframe, BUFFER_DATA_LENGTH, df, calc_indicators, self.technical_param, self.delta_hour_from_gmt)
-            self.buffer = buffer
+            self.update()
             os.makedirs('./debug', exist_ok=True)
             #save(buffer.data, './debug/initial_' + self.symbol + '_' + datetime.now().strftime('%Y-%m-%d_%H_%M_%S') + '.xlsx')
             return True            
         else:
             print(f'*マーケットクローズ: {self.symbol}')
-            buffer = DataBuffer(self.symbol, self.timeframe, BUFFER_DATA_LENGTH , df, calc_indicators, self.technical_param, self.delta_hour_from_gmt)
-            self.buffer = buffer
             return False
     
     def update(self):
         self.remove_closed_positions()
         record = self.trailing()
-        df = self.mt5.get_rates(self.symbol, self.timeframe, 2)
+        df = self.mt5.get_rates(self.symbol, self.timeframe, self.data_length)
+        # remove invalid data
         df = df.iloc[:-1, :]
-        n = self.buffer.update(df)
-        if n > 0:
-            current_time = self.buffer.last_time()
-            current_index = self.buffer.last_index()
-            #save(self.buffer.data, './debug/update_' + self.symbol + '_' + datetime.now().strftime('%Y-%m-%d_%H_%M_%S') + '.xlsx')
-            #self.check_timeup(current_index)
-            entry_signal = self.buffer.data[self.entry_column][-1]
-            exit_signal = self.buffer.data[self.exit_column][-1]
-            if exit_signal != 0:
-                positions = self.trade_manager.open_positions()
-                if len(positions) > 0:
-                    self.close_positions(positions, exit_signal)
-                    self.debug_print('<Exit> position num:', self.symbol, self.timeframe, len(positions))
-                    record = True
-            if entry_signal == Signal.LONG or entry_signal == Signal.SHORT:
-                self.debug_print('<Signal> ', self.symbol, self.timeframe,  entry_signal)
-                self.entry(self.buffer.data, entry_signal, current_index, current_time)
-            if record:
-                try:
-                    df = self.trade_manager.summary()
-                    dir_path = f'./trading/summary/{self.symbol}/{self.timeframe}'
-                    os.makedirs(dir_path, exist_ok=True)
-                    path = os.path.join(dir_path, f'{self.symbol}_{self.timeframe}_trade_summary.xlsx')
-                    df.to_excel(path, index=False)
-                except:
-                    pass
+        dic = self.df2dic(df)
+        jst = dic[Columns.JST]
+        if self.last_time is None:
+            self.last_time = jst[-1]
+        else:
+            if jst[-1] <= self.last_time:
+                return
+            else:
+                self.last_time = jst[-1]            
+        self.cypress.calc(dic)
+        ent = self.cypress.entries[-1]
+        ext = self.cypress.exits[-1]
+        if ent == Cypress.LONG:
+            self.entry(Signal.LONG, jst[-1])
             self.save_trade_manager()
-        return n
-    
-            
-                
+        elif ent == Cypress.SHORT:
+            self.entry(Signal.SHORT, jst[-1])
+            self.save_trade_manager
+        
     def mt5_position_num(self):
         positions = self.mt5.get_positions()
         count = 0
@@ -253,25 +245,18 @@ class TradeBot:
                 count += 1
         return count
         
-    def entry(self, data, signal, index, time):
-        volume = self.trade_param['volume']
-        sl = self.trade_param['sl_value']
-        trail_target = self.trade_param['trail_target']
-        trailing_stop = self.trade_param['trail_stop']          
-        timelimit = self.trade_param['timelimit']                       
-        position_max = int(self.trade_param['position_max'])
+    def entry(self, signal, time):
+        volume = self.param['volume']
+        sl = self.param['sl'] 
+        tp = self.param['tp']                      
+        position_max = int(self.param['position_max'])
         num =  self.mt5_position_num()
         if num >= position_max:
-            self.debug_print('<Entry> Request Canceled ', self.symbol, index, time,  'Position num', num)
+            self.debug_print('<Entry> Request Canceled ', self.symbol, time,  'Position num', num)
             return
-        if sl == 0:
-            atr = data[Indicators.ATR]
-            sl = atr[index] * 2.0
-            
         try:
-            ret, position_info = self.mt5.entry(signal, index, time, volume, stoploss=sl, takeprofit=None)
+            ret, position_info = self.mt5.entry(signal, time, volume, stoploss=sl, takeprofit=tp)
             if ret:
-                position_info.trail_target = trail_target
                 self.trade_manager.add_position(position_info)
                 self.debug_print('<Entry> signal', position_info.signal, position_info.symbol, position_info.entry_index, position_info.entry_time)
         except Exception as e:
@@ -375,48 +360,38 @@ def load_params(symbol, timeframe, volume, position_max):
     return param1, param2
     
 
-def create_bot(symbol, timeframe, lot):
-    technical_param, trade_param = load_params(symbol, timeframe, lot, 1)
-    bot = TradeBot(symbol, timeframe, 1, Indicators.ANKO_ENTRY, Indicators.ANKO_EXIT, technical_param, trade_param)    
+def create_bot(symbol, lot):
+    param = load_params(symbol)
+    param['lot'] = lot
+    bot = TradeBot(symbol, param)    
     bot.set_sever_time(3, 2, 11, 1, 3.0)
     return bot
-
-ALL_ITEMS = [   ['CL', 'M30', 0.01],
-            ['DOW', 'M30', 0.01],
-            ['HK50', 'M30', 0.01],
-            ['NIKKEI', 'H1', 0.01],
-            ['NSDQ', 'H1', 0.01],
-            ['NSDQ', 'M30', 0.01],
-            ['NSDQ', 'M15', 0.01],
-            ['DAX', 'M30', 0.01],
-            ['FTSE', 'M30', 0.01],
-            ['USDJPY', 'M30', 0.01],
-            ['XAUUSD', 'H1', 0.01],
-            ['XAUUSD', 'M30', 0.1]
-        ]
-    
-ITEMS1 = [   
-                ['NIKKEI', 'H1', 0.02],
-                ['NSDQ', 'H1', 0.02],
-                ['NSDQ', 'M30', 0.02],
-                ['USDJPY', 'M30', 0.02],
-                ['XAUUSD', 'M30', 0.02]
-        ]
          
-def test():
-
+def is_trade_time():
+    now = datetime.now()
+    begin = datetime(now.year, now.month, now.day, hour=8)
+    end = datetime(now.year, now.month, now.day, hour=0) + timedelta(days=1)
+    return (now >= begin and now < end)
+         
+def execute():
+    ITEMS = [ 
+                ['NIKKEI', 0.01],
+                ['NSDQ', 0.01],
+            ]
     bots = {}
-    for i, (symbol, timeframe, lot) in enumerate(ITEMS1):
-        bot = create_bot(symbol, timeframe, lot)
+    for i, (symbol, timeframe, lot) in enumerate(ITEMS):
+        bot = create_bot(symbol, lot)
         if i == 0:
             Mt5Trade.connect()
         bot.run()
         bots[symbol ] = bot
-    while True:
-        for i, (symbol, timeframe, lot) in enumerate(ITEMS1):
+        
+        
+    while is_trade_time():
+        for i, (symbol, lot) in enumerate(ITEMS):
             scheduler.enter(10, 1 + 1, bots[symbol].update)
             scheduler.run()
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
-    test()
+    execute()
