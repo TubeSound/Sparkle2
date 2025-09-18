@@ -171,14 +171,22 @@ def set_param(symbol, param):
     param.short_term = rand_step(12, 30, 2)
     param.long_term = rand_step(40, 100, 20)
     param.trend_slope_th = rand_step(0.5, 5, 0.5)
-    param.tp = rand_step(10, 300, 10)
-    param.sl = rand_step(10, 300, 10)
-        
+    if symbol in ['NIKKEI', 'NSDQ', 'DOW']:
+        param.tp = rand_step(10, 300, 10)
+        param.sl = rand_step(10, 300, 10)
+    elif symbol in ['XAUUSD']:
+        param.tp = rand_step(1, 30, 1)
+        param.sl = rand_step(1, 30, 1)        
 
 def optimizer(symbol, save_dir, repeat=2000):
     dir_path = os.path.join(save_dir, 'Optimize')
     os.makedirs(dir_path, exist_ok=True)
     files = market_data_files(symbol)
+    if len(files) > 10:
+        print('Optimize start', symbol)
+    else:
+        print('No file', symbol)
+        return
     
     i = 0
     result = []
@@ -199,16 +207,17 @@ def optimizer(symbol, save_dir, repeat=2000):
             if len(r) > 0:
                 rows += r
         df = pd.DataFrame(data=rows, columns=columns)
-        if len(df) < 10:
+        if len(df) == 0:
             continue
         metric = performance(df)
-        if metric['profit'] > 2000:
+        if metric['profit'] > 200:
             save_profit_graph(symbol, str(i).zfill(3), df, dir_path)
         d1 = param.to_dict()
         d0 = {'i': i}
         d = dict(**d0, **d1)
         dic = dict(**d, **metric)
         result.append(dic)
+        print(i, symbol, '... done')
         i += 1
     
     keys = result[0].keys()
@@ -352,8 +361,8 @@ def main(symbol, tp, sl, graph_height):
     save_result(symbol, '#0', df, dir_path)
 
         
-def test():
-    optimizer('NSDQ', './Cypress/Optimize/NSDQ')
+def test(symbol):
+    optimizer(symbol, f'./Cypress/{symbol}')
 
 def loop():
     symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
@@ -378,4 +387,4 @@ def loop():
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    test()
+    test('XAUUSD')

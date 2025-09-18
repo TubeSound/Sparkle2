@@ -148,7 +148,7 @@ def main4(symbol, year, month, timeframe):
     api = Mt5Api()
     api.connect()
     for day in range(1, 31):
-        for i in range(1, 3):
+        for i in range(1, 4):
             t0 = datetime(year, month, day, 8).astimezone(tz=JST)
             try:
                 t1 = t0 + timedelta(hours= (i - 1) * 8)
@@ -167,9 +167,9 @@ def main4(symbol, year, month, timeframe):
                 df.to_csv(os.path.join(dirpath, filename), index=False)
 
 if __name__ == '__main__':
-    symbol = 'NIKKEI'
     timeframe = 'M1'
-    for m in range(4, 10):
-        main4(symbol, 2025, m, timeframe)
+    for symbol in ['NIKKEI', 'DOW', 'NSDQ', 'XAUUSD']:
+        for m in range(4, 10):
+            main4(symbol, 2025, m, timeframe)
     
 
