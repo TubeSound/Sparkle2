@@ -5,24 +5,15 @@ from dateutil import tz
 from datetime import datetime, timedelta
 import numpy as np
 from dateutil import tz
-from common import Signal, TimeFrame, Columns
-
+from common import TimeFrame, Columns
+from time_utils import TimeUtils
+from trade_manager import PositionInfo, Signal
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')  
 
 
-order_types = {
-                mt5api.ORDER_TYPE_BUY:'Market Buy order',
-                mt5api.ORDER_TYPE_SELL: 'Market Sell order',
-                mt5api.ORDER_TYPE_BUY_LIMIT: 'Buy Limit pending order',
-                mt5api.ORDER_TYPE_SELL_LIMIT: 'Sell Limit pending order',
-                mt5api.ORDER_TYPE_BUY_STOP: 'Buy Stop pending order',
-                mt5api.ORDER_TYPE_SELL_STOP:'Sell Stop pending order',
-                mt5api.ORDER_TYPE_BUY_STOP_LIMIT: 'Upon reaching the order price, a pending Buy Limit order is placed at the StopLimit price',
-                mt5api.ORDER_TYPE_SELL_STOP_LIMIT: 'Upon reaching the order price, a pending Sell Limit order is placed at the StopLimit price',
-                mt5api.ORDER_TYPE_CLOSE_BY: 'Order to close a position by an opposite one'
-}   
-
+  
+        
         
 def now():
     t = datetime.now(tz=UTC)
@@ -38,7 +29,16 @@ def nptimestamp2pydatetime(npdatetime):
     #dt2 = datetime.utcfromtimestamp(timestamp)
     return dt
 
+def jst2utc(jst: datetime): 
+    return jst.astimezone(UTC)
 
+def utc2jst(utc: datetime): 
+    return utc.astimezone(JST)
+
+def utcstr2datetime(utc_str: str, format='%Y-%m-%d %H:%M:%S'):
+    utc = datetime.strptime(utc_str, format)
+    utc = utc.replace(tzinfo=UTC)
+    return utc
 
 def slice(df, ibegin, iend):
     new_df = df.iloc[ibegin: iend + 1, :]
@@ -75,83 +75,20 @@ def position_dic_array(positions):
         array.append(d)
     return array
 
-class PositionInfo:
-    def __init__(self, symbol, typ, time: datetime, volume, ticket, price, sl, tp, target_profit=0):
-        self.symbol = symbol
-        self.type = typ
-        self.volume = volume
-        self.ticket = ticket
-        self.entry_time = time
-        self.entry_price = price
-        self.sl = sl
-        self.tp = tp
-        self.target_profit = target_profit
 
-        self.exit_time = None       
-        self.exit_price = None
-        self.profit = None
-        self.profit_max = None
-        self.closed = False
-        self.losscutted = False
-        self.trailing_stopped = False
-        self.time_upped = False
- 
-    def signal(self):
-        if self.type == mt5api.ORDER_TYPE_BUY:
-            return Signal.LONG
-        elif self.type == mt5api.ORDER_TYPE_BUY_LIMIT:
-            return Signal.LONG
-        elif self.type == mt5api.ORDER_TYPE_BUY_STOP:
-            return Signal.LONG
-        elif self.type == mt5api.ORDER_TYPE_BUY_STOP_LIMIT:
-            return Signal.LONG
-        elif self.type == mt5api.ORDER_TYPE_SELL:
-            return Signal.SHORT
-        elif self.type == mt5api.ORDER_TYPE_SELL_LIMIT:
-            return Signal.SHORT
-        elif self.type == mt5api.ORDER_TYPE_SELL_STOP:
-            return Signal.SHORT
-        elif self.type == mt5api.ORDER_TYPE_SELL_STOP_LIMIT:
-            return Signal.SHORT
-        else:
-            return None
- 
-    def update_profit(self, price):
-        profit = price - self.entry_price
-        if self.signal() == Signal.SHORT:
-            profit *= -1
-        triggered = False
-        if self.profit_max is None:
-            if profit >= self.target_profit:
-                self.profit_max = profit
-                triggered = True
-        else:
-            if profit > self.profit_max:
-                self.profit_max = profit
-        return triggered, profit, self.profit_max
-        
-    def timeup_count(self, timelimit: int):
-        if self.is_no_takeprofit():
-            self.timelimit = timelimit
-                
-    def timeup(self, index: int):
-        return ((index - self.entry_index) > self.timelimit)
-            
-    def desc(self):
-        type_str = order_types[self.type]
-        s = 'symbol: ' + self.symbol + ' type: ' + type_str + ' volume: ' + str(self.volume) + ' ticket: ' + str(self.ticket)
-        return s
-    
-    def array(self):
-        columns = ['symbol', 'type', 'volume', 'ticket', 'sl', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'profit', 'closed', 'losscutted', 'trailing_stopped', 'time_upped']
-        type_str = order_types[self.type]
-        data = [self.symbol, type_str, self.volume, self.ticket, self.sl, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, self.losscutted, self.trailing_stopped, self.time_upped]
-        return data, columns
     
 class Mt5Trade:
-    def __init__(self):
+    def __init__(self, begin_month, begin_sunday, end_month, end_sunday, delta_hour_from_gmt_in_summer):
+        self.set_sever_time(begin_month, begin_sunday, end_month, end_sunday, delta_hour_from_gmt_in_summer)
         self.ticket = None
         self.symbol = None
+        
+    def set_sever_time(self, begin_month, begin_sunday, end_month, end_sunday, delta_hour_from_gmt_in_summer):
+        now = datetime.now(JST)
+        dt, tz = TimeUtils.delta_hour_from_gmt(now, begin_month, begin_sunday, end_month, end_sunday, delta_hour_from_gmt_in_summer)
+        self.delta_hour_from_gmt  = dt
+        self.server_timezone = tz
+        print('SeverTime GMT+', dt, tz)
         
     @staticmethod
     def connect():
@@ -188,8 +125,8 @@ class Mt5Trade:
             print('Entry error code', code)
             return False, None
         
-    def current_price(self, signal):
-        tick = mt5api.symbol_info_tick(self.symbol)
+    def current_price(self, symbol, signal):
+        tick = mt5api.symbol_info_tick(symbol)
         if signal == Signal.LONG:
             return tick.ask
         elif signal == Signal.SHORT:
@@ -197,17 +134,19 @@ class Mt5Trade:
         else:
             return None
         
-    def entry(self, signal: Signal, time: datetime, volume:float, stoploss=None, takeprofit=0, deviation=20):        
-        point = mt5api.symbol_info(self.symbol).point
-        price = self.current_price(signal)
+    def entry(self, symbol, signal: Signal, time: datetime, volume:float, stoploss=None, takeprofit=0, deviation=20):        
+        #point = mt5api.symbol_info(self.symbol).point
+        price = self.current_price(symbol, signal)
         if signal == Signal.LONG:
             typ =  mt5api.ORDER_TYPE_BUY
         elif signal == Signal.SHORT:
             typ =  mt5api.ORDER_TYPE_SELL
             
+        print('Entry symbol:', symbol, 'signal:', signal, 'Price:', price, 'volume:', volume, 'deviation:', deviation)
+            
         request = {
             "action": mt5api.TRADE_ACTION_DEAL,
-            "symbol": self.symbol,
+            "symbol": symbol,
             "volume": float(volume),
             "type": typ,
             "price": float(price),
@@ -325,7 +264,7 @@ class Mt5Trade:
         
     def parse_ticks(self, ticks):
         df = pd.DataFrame(ticks)
-        df[Columns.TIME] = pd.to_datetime(df[Columns.TIME], unit='s')
+        df["time"] = pd.to_datetime(df["time"], unit='s')
         return df
     
     def get_rates_jst(self, symbol, timeframe: TimeFrame, jst_begin, jst_end):
@@ -344,10 +283,19 @@ class Mt5Trade:
             raise Exception('get_rates error')
         return self.parse_rates(rates)
 
+
+    def severtime2utc(self, time):
+        return [t.replace(tzinfo=UTC) - self.delta_hour_from_gmt for t in time]
+
     def parse_rates(self, rates):
         df = pd.DataFrame(rates)
-        df[Columns.TIME] = pd.to_datetime(df[Columns.TIME], unit='s')
+        time = pd.to_datetime(df['time'], unit='s')
+        utc = self.severtime2utc(time)
+        df[Columns.UTC] = utc
+        jst = [utc2jst(t) for t in utc]
+        df[Columns.JST] = jst
         return df
+    
         
 class Mt5TradeSim:
     def __init__(self, symbol: str, files: dict):
@@ -366,9 +314,9 @@ class Mt5TradeSim:
         dic = {}
         for timeframe, file in files.items():
             df = pd.read_csv(file)
-            time_str_2_datetime(df, Columns.TIME)
+            time_str_2_datetime(df, "time")
             if timeframe == TimeFrame.TICK:
-                self.adjust_msec(df, Columns.TIME, 'time_msc')
+                self.adjust_msec(df, "time", 'time_msc')
             dic[timeframe] = df
         self.dic = dic
     
@@ -398,11 +346,11 @@ class Mt5TradeSim:
     def get_rates(self, timeframe: str, utc_begin, utc_end):
         #print(self.symbol, timeframe)
         df = self.dic[timeframe]
-        return self.search_in_time(df, Columns.TIME, utc_begin, utc_end)
+        return self.search_in_time(df, "time", utc_begin, utc_end)
 
     def get_ticks(self, utc_begin, utc_end):
         df = self.dic[TimeFrame.TICK]
-        return self.search_in_time(df, Columns.TIME, utc_begin, utc_end)
+        return self.search_in_time(df, "time", utc_begin, utc_end)
 
 def test1():
     symbol = 'NIKKEI'
@@ -421,6 +369,15 @@ def test1():
     mt5trade.close_order_result(result, result.volume)
     pass
 
+def test2():
+    trade = Mt5Trade(3, 2, 11, 1, 3.0)
+    trade.connect()
+    df = trade.get_rates('NIKKEI', 'M1', 3)
+    print(df[Columns.UTC], df[Columns.JST])
+    
+    
+    now = datetime.now()
+    trade.entry('NIKKEI', Signal.LONG, now, 0.01, 100, 100)
 
 if __name__ == '__main__':
-    test1()
+    test2()

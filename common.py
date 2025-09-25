@@ -16,7 +16,7 @@ LOW = -1
 HIGH = 1
 
 class Columns:
-    TIME = 'time'
+    UTC = 'utc'
     JST = 'jst'
     OPEN = 'open'
     HIGH = 'high'
@@ -28,10 +28,6 @@ class Columns:
     HL2 = 'hl2'
     VOLUME = 'volume'
     TIMESTAMP = 'timestamp'
-
-class Signal:
-    LONG = 1
-    SHORT = -1    
     
 class TimeFrame:
     TICK = 'TICK'

@@ -1,7 +1,10 @@
 import numpy as np
+import pandas as pd
+import MetaTrader5 as mt5api
+
 from technical import calc_sma, calc_ema, ATRP, slopes, detect_pivots, is_nans, slice_upper_abs, detect_perfect_order
 from common import Columns, Indicators
-import pandas as pd
+from trade_manager import TradeManager, Signal, PositionInfo
 
 class CypressParam:
     long_term = 50
@@ -11,6 +14,8 @@ class CypressParam:
     atr_term = 20
     sl = 20
     tp = 20
+    trade_max = 10
+    volume = 0.01
 
     def to_dict(self):
         dic = {
@@ -20,27 +25,40 @@ class CypressParam:
                 'trend_slope_th': self.trend_slope_th,
                 'atr_term': self.atr_term,
                 'sl': self.sl,
-                'tp': self.tp
+                'tp': self.tp,
+                'trade_max': self.trade_max,
+                'volume': self.volume
                }
         return dic
 
 class Cypress:
-    TECHNICAL_CLOSE = 2
-    STOP_LOSS = 2
-    TRAILING_STOP = 3
-    
-    LONG = 1
-    SHORT = -1
-    CLOSE = 2
-    
-    reason = {TECHNICAL_CLOSE: 'TECH', STOP_LOSS:'SL', TRAILING_STOP: 'TRAIL'}
-    
-    
-    
-    
-    
-    def __init__(self, param: CypressParam):
+    def __init__(self, symbol, param: CypressParam):
+        self.symbol = symbol
         self.param = param
+        
+        
+    def result_df(self):
+        dic = {
+                'jst': self.timestamp,
+                'open': self.op, 
+                'high': self.hi,
+                'low': self.lo,
+                'close': self.cl, 
+                'entry_signal': self.entries,
+                'exit_signal': self.exits,
+                'trend': self.trend,
+                'atrp': self.atrp,
+                'mid_slope': self.mid_slope,
+                'long_slope': self.short_slope,
+                'long': self.buy_signal, 
+                'short': self.sell_signal,
+                'exit': self.exit_signal, 
+                'reason': self.reason,
+                'profit': self.profits
+                } 
+        
+        df = pd.DataFrame(dic)
+        return df
         
     def difference(self, vector1, vector2, ma_window):
         n = len(vector1)
@@ -148,75 +166,129 @@ class Cypress:
                 if self.cl[i - 1] <= self.ema_short[i - 1] and self.cl[i] >= self.ema_short[i]:
                     # Short
                     if state == 0:
-                        entries[i] = self.SHORT
+                        entries[i] = Signal.SHORT
                         last_price = self.cl[i]
-                        state = self.SHORT
-                    elif state == self.SHORT:                    
+                        state = Signal.SHORT
+                    elif state == Signal.SHORT:                    
                         if last_price >= self.cl[i]: 
-                            entries[i] = self.SHORT
+                            entries[i] = Signal.SHORT
                             last_price = self.cl[i]
-                            state = self.SHORT 
+                            state = Signal.SHORT 
                         else:
-                            exits[i] = self.CLOSE
+                            exits[i] = Signal.CLOSE
                             state = 0
-                    elif state == self.LONG:
-                        entries[i] = self.SHORT
-                        exits[i] = self.CLOSE
+                    elif state == Signal.LONG:
+                        entries[i] = Signal.SHORT
+                        exits[i] = Signal.CLOSE
                         last_price = self.cl[i]
-                        state = self.SHORT                           
+                        state = Signal.SHORT                           
             elif self.trend[i] == 1:
                 if self.cl[i - 1] >= self.ema_short[i - 1] and self.cl[i] <= self.ema_short[i]:
                     # Long
                     if state == 0:
-                        entries[i] = self.LONG
+                        entries[i] = Signal.LONG
                         last_price = self.cl[i]
-                        state = self.LONG
-                    elif state == self.LONG:
+                        state = Signal.LONG
+                    elif state == Signal.LONG:
                         if last_price <= self.cl[i]:
-                            entries[i] = self.LONG
+                            entries[i] = Signal.LONG
                             last_price = self.cl[i]
-                            state = self.LONG
+                            state = Signal.LONG
                         else:
-                            exits[i] = self.CLOSE
+                            exits[i] = Signal.CLOSE
                             state = 0
-                    elif state == self.SHORT:
-                        entries[i] = self.LONG
-                        exits[i] = self.CLOSE
+                    elif state == Signal.SHORT:
+                        entries[i] = Signal.LONG
+                        exits[i] = Signal.CLOSE
                         last_price = self.cl[i]
-                        state = self.LONG
+                        state = Signal.LONG
         return entries, exits
 
                                       
     
-    # ── 汎用：シンボル→pip_size 解決（必要なら外部から渡してもOK）
-    def resolve_pip_size(self, symbol: str) -> float:
-        """
-        代表例:
-        - USDJPY, EURJPY など: 0.01
-        - XAUUSD: 0.1  (ブローカー定義に合わせて調整)
-        - 日経225/ダウ/ナスダックなど指数CFD: 1.0（=1ポイント）
-        """
-        s = symbol.upper()
-        if s.endswith("JPY"): return 0.01
-        if s in ("XAUUSD","GOLD","XAU"): return 0.1
-        if s in ("NIKKEI","JP225","US30","US100","DOW","NSDQ","NAS100"): return 1.0
-        # FXの多く: 小数第4位 ＝ 0.0001
-        return 0.0001
 
+    def simulate_scalping(self, priory: str = "SL_FIRST"):
+        def cleanup(i, h, l):
+            close_tickets = []
+            for ticket, position in manager.positions.items():
+                if position.is_sl(l, h):
+                    position.profit = - position.sl
+                    position.exit_time = jst[i]
+                    position.exit_price = position.sl_price
+                    position.reason = PositionInfo.STOP_LOSS
+                    close_tickets.append(ticket)
+                    reason[i] = PositionInfo.STOP_LOSS
+                    exit_signal[i] = position.ticket
+                    profits[i] = - position.sl
+                elif position.is_tp(l, h):
+                    position.profit = position.tp 
+                    position.exit_time = jst[i]
+                    position.exit_price = position.tp_price
+                    position.reason = PositionInfo.TAKE_PROFIT
+                    reason[i] = PositionInfo.TAKE_PROFIT
+                    exit_signal[i] = ticket
+                    profits[i] = position.tp
+                    close_tickets.append(ticket)
+            manager.remove_positions(close_tickets)
+            
+        n = len(self.cl)
+        jst = self.timestamp
+        manager = TradeManager(self.symbol, 'M1')    
+        ticket = 1
+        buy_signal = np.full(n, 0)
+        sell_signal = np.full(n, 0)
+        exit_signal = np.full(n, 0)
+        reason = np.full(n, 0)
+        profits = np.full(n, 0)
+        for i in range(n):
+            cleanup(i, self.hi[i], self.lo[i])
+            entry = self.entries[i]    
+            if entry == 0:
+                continue
+            elif entry == Signal.LONG:
+                typ =  mt5api.ORDER_TYPE_BUY_STOP_LIMIT
+                buy_signal[i] = ticket
+            elif entry == Signal.SHORT:
+                typ =  mt5api.ORDER_TYPE_SELL_STOP_LIMIT
+                sell_signal[i] = ticket
+            pos = PositionInfo(self.symbol, typ, jst[i], self.param.volume, ticket, self.cl[i], self.param.sl, self.param.tp)
+            manager.add_position(pos)
+            ticket += 1
+            
+        close_tickets = []
+        for ticket, position in manager.positions.items():
+            if position.order_signal == Signal.LONG:
+                position.profit = self.cl[-1] - position.entry_price
+                position.exit_time = jst[-1]
+                position.exit_price = self.cl[-1]
+                position.reason = PositionInfo.TIMEUP
+                exit_signal[-1] = ticket
+                reason[-1] = PositionInfo.TIMEUP
+                profits[-1] = position.profit
+                close_tickets.append(ticket)
+            elif position.order_signal == Signal.SHORT:
+                position.profit = position.entry_price - self.cl[-1] 
+                position.exit_time = jst[-1]
+                position.exit_price = self.cl[i]
+                position.reason = PositionInfo.TIMEUP
+                exit_signal[-1] = ticket
+                reason[-1] = PositionInfo.TIMEUP
+                profits[-1] = position.profit
+                close_tickets.append(ticket)
+        manager.remove_positions(close_tickets)    
 
-    def _append_row(self, rows, ts, entry_i, i, trade_id, side, price, fees_pips, pip_size, reason):
-        diff = (price[i] - price[entry_i]) * (1 if side > 0 else -1)
-        pnl_pips = (diff / pip_size) - fees_pips
-        rows.append((
-            ts[entry_i], ts[i], trade_id, side,
-            float(price[entry_i]), float(price[i]),
-            float(pnl_pips), reason
-        ))
+        self.buy_signal = buy_signal
+        self.sell_signal = sell_signal
+        self.exit_signal = exit_signal
+        self.reason = reason
+        self.profits = profits
+        return manager
+
 
 
     def simulate_scalping_pips_multi(
         self,
-        priority: str = "TP_FIRST",        # "SL_FIRST" or "TP_FIRST"
+        priority: str = "SL_FIRST",        # "SL_FIRST" or "TP_FIRST"
         check_from_next_bar: bool = True,  # True: エントリーバーは判定しない
     ):
         """
@@ -236,6 +308,10 @@ class Cypress:
         positions = []  # {id, side, entry_i}
         tid = 1
         n = len(cl)
+        buy = np.full(n, 0)
+        sell = np.full(n, 0)
+        cls = np.full(n, 0)
+        profits = np.full(n, 0)
 
         for i in range(n):
             to_close = []
@@ -244,66 +320,110 @@ class Cypress:
             for pos in positions:
                 i0   = pos["entry_i"]
                 side = pos["side"]
-                ep   = cl[i0]
+                price0   = cl[i0]
 
                 # ルックアヘッド回避：次バー以降のみ判定
                 if check_from_next_bar and i <= i0:
                     continue
+                
+                # Timeup
+                if i == n - 1:
+                    reason = self.TIMEUP
+                    if side == Signal.LONG:
+                        profit = cl[i] - price0
+                        sell[i] = pos['id']        
+                    elif side == Signal.SHORT:
+                        profit = price0 - cl[i]
+                        buy[i] = pos['id']
+                    else:
+                        break
+                    rows.append([ts[i0], ts[i], pos["id"], side, float(price0), float(cl[i]), profit, self.close_reason[reason]])                    
+                    break
 
-                if side == self.LONG:
-                    tp = ep + self.param.tp
-                    sl = ep - self.param.sl
+                if side == Signal.LONG:
+                    tp = price0 + self.param.tp
+                    sl = price0 - self.param.sl
                     hit_tp = (hi[i] >= tp)
                     hit_sl = (lo[i] <= sl)
                     reason = None
-                    ex_px  = None
+                    price1 = None
+                    profit = None
 
                     if hit_tp and hit_sl:
                         if priority == "TP_FIRST":
-                            reason, ex_px = "TP", tp
+                            reason = self.TAKE_PROFIT
+                            profit = self.param.tp
+                            price1 = tp
                         else:  # "SL_FIRST"
-                            reason, ex_px = "SL", sl
+                            reason = self.STOP_LOSS
+                            profit = - self.param.sl
+                            price1 = sl
                     elif hit_tp:
-                        reason, ex_px = "TP", tp
+                        reason = self.TAKE_PROFIT
+                        profit = self.param.tp
+                        price1 = tp
                     elif hit_sl:
-                        reason, ex_px = "SL", sl
+                        reason = self.STOP_LOSS
+                        profit = - self.param.sl
+                        price1 = sl
 
                     if reason is not None:
-                        pnl = (ex_px - ep)  # long
-                        rows.append((ts[i0], ts[i], pos["id"], side, float(ep), float(ex_px), float(pnl), reason))
+                        rows.append((ts[i0], ts[i], pos["id"], side, float(price0), float(price1), float(profit), self.close_reason[reason]))
+                        sell[i] = pos['id']
+                        cls[i] = reason
+                        profits[i] = profit
                         to_close.append(pos)
 
                 else:  # SHORT
-                    tp = ep - self.param.tp
-                    sl = ep + self.param.sl
+                    tp = price0 - self.param.tp
+                    sl = price0 + self.param.sl
                     hit_tp = (lo[i] <= tp)
                     hit_sl = (hi[i] >= sl)
                     reason = None
-                    ex_px  = None
+                    profit = None
+                    price1  = None
 
                     if hit_tp and hit_sl:
                         if priority == "TP_FIRST":
-                            reason, ex_px = "TP", tp
+                            reason = self.TAKE_PROFIT
+                            price1 = tp
+                            profit = self.param.tp
                         else:
-                            reason, ex_px = "SL", sl
+                            reason = self.STOP_LOSS
+                            price1 = sl
+                            profit = - self.param.sl
                     elif hit_tp:
-                        reason, ex_px = "TP", tp
+                        reason = self.TAKE_PROFIT
+                        price1 = tp
+                        profit = self.param.tp
                     elif hit_sl:
-                        reason, ex_px = "SL", sl
-
+                        reason = self.STOP_LOSS
+                        profit = - sl
+                        price1 = sl
                     if reason is not None:
-                        pnl = (ep - ex_px)  # short
-                        rows + [ts[i0], ts[i], pos["id"], side, float(ep), float(ex_px), float(pnl), reason]
+                        rows.append([ts[i0], ts[i], pos["id"], side, float(price0), float(price1), float(profit), self.close_reason[reason]])
+                        buy[i] = pos['id']
+                        cls[i] = reason
+                        profits[i] = profit
                         to_close.append(pos)
 
             if to_close:
                 positions = [p for p in positions if p not in to_close]
-
+                    
+            
             # 2) 新規エントリー（複数可）
-            if sig[i] == self.LONG or sig[i] == self.SHORT:
+            if sig[i] == Signal.LONG or sig[i] == Signal.SHORT:
                 positions.append({"id": tid, "side": sig[i], "entry_i": i})
+                if sig[i] == Signal.LONG:
+                    buy[i] = tid
+                elif sig[i] == Signal.SHORT:
+                    sell[i] = tid                
                 tid += 1
-
+                
+        self.trade_buy = buy
+        self.trade_sell = sell
+        self.trade_close_reason = cls
+        self.trade_profits = profits
         return rows, ["time_entry","time_exit","id","side","price_entry","price_exit","profit","reason"]
 
     def simulate_doten_pips(
@@ -340,7 +460,7 @@ class Cypress:
                     trade_id += 1
 
             # 反対信号でドテン
-            if (side == self.LONG and s == self.SHORT) or (side == self.SHORT and s == self.LONG):
+            if (side == Signal.LONG and s == Signal.SHORT) or (side == Signal.SHORT and s == Signal.LONG):
                 # まずクローズ
                 self._append_row(rows, ts, entry_i, i, trade_id, side, price, fees_pips, pip_size, "REVERSE")
                 trade_id += 1
@@ -350,7 +470,7 @@ class Cypress:
                 continue
 
             # 0→新規
-            if side == 0 and (s == self.LONG or s == self.SHORT):
+            if side == 0 and (s == Signal.LONG or s == Signal.SHORT):
                 side = s
                 entry_i = i
 

@@ -9,13 +9,13 @@ import numpy as np
 import pandas as pd
 from dateutil import tz
 from datetime import datetime, timedelta, timezone
-from mt5_trade import Mt5Trade, Columns, PositionInfo
+from mt5_trade import Mt5Trade, Columns
 import sched
 
-
+from trade_manager import PositionInfo, Signal
 from time_utils import TimeUtils
 from utils import Utils
-from common import Signal, Indicators
+from common import Indicators
 
 from cypress import Cypress, CypressParam
 
@@ -54,10 +54,6 @@ def is_market_open(mt5, timezone, symbol='USDJPY'):
     t -= timedelta(seconds=5)
     df = mt5.get_ticks_from(symbol, t, length=100)
     return (len(df) > 0)
-        
-def wait_market_open(mt5, timezone, symbol='USDJPY'):
-    while is_market_open(symbol, mt5, timezone) == False:
-        time.sleep(5)
 
 def save(data, path):
     d = data.copy()
@@ -68,61 +64,7 @@ def save(data, path):
     df = pd.DataFrame(d)
     df.to_excel(path, index=False)
     
-class TradeManager:
-    def __init__(self, symbol, timeframe):
-        self.symbol = symbol
-        self.timeframe = timeframe
-        self.positions = {}
-        self.positions_closed = {}
 
-    def add_position(self, position: PositionInfo):
-        self.positions[position.ticket] = position
-       
-    def move_to_closed(self, ticket):
-        if ticket in self.positions.keys():
-            pos = self.positions.pop(ticket)
-            self.positions_closed[ticket] = pos
-
-        else:
-            print('move_to_closed, No tickt')
-        
-    def summary(self):
-        out = []
-        for ticket, pos in list(self.positions.items()) + list(self.positions_closed.items()):
-            d, columns = pos.array()
-            out.append(d)
-        df = pd.DataFrame(data=out, columns=columns)
-        return df
-
-    def remove_positions(self, tickets):
-        for ticket in tickets:
-            self.move_to_closed(ticket)
-            
-    def open_positions(self):
-        return self.positions
-    
-    def untrail_positions(self):
-        positions = {}
-        for ticket, position in self.positions.items():
-            if position.profit_max is None:
-                positions[ticket] = position
-        return positions
-    
-    def remove_position_auto(self, mt5_positions):
-        remove_tickets = []
-        for ticket, info in self.positions.items():
-            found = False
-            for position in mt5_positions:
-                if position.ticket == ticket:
-                    found = True
-                    break    
-            if found == False:
-                remove_tickets.append(ticket)
-        if len(remove_tickets):
-            self.remove_positions(remove_tickets)    
-            print('<Closed by Meta Trader Stoploss or Takeprofit> ', self.symbol, 'tickets:', remove_tickets)
-            
-      
 class TradeBot:
     def __init__(self, symbol:str, param:dict):
         self.symbol = symbol
@@ -131,8 +73,10 @@ class TradeBot:
         self.invterval_seconds = 10
         self.param = param
         self.cypress = self.build_cypress(param)
-        mt5 = Mt5Trade() 
+        mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
+        self.trade_manager = TradeManager(symbol, 'M1')
+        
         self.last_time = None
         self.mt5 = mt5
         self.delta_hour_from_gmt = None
@@ -211,8 +155,8 @@ class TradeBot:
             return False
     
     def update(self):
+        t0 = datetime.now()
         self.remove_closed_positions()
-        record = self.trailing()
         df = self.mt5.get_rates(self.symbol, self.timeframe, self.data_length)
         # remove invalid data
         df = df.iloc[:-1, :]
@@ -221,11 +165,16 @@ class TradeBot:
         if self.last_time is None:
             self.last_time = jst[-1]
         else:
+            #print(self.symbol, 'Last:', self.last_time, 'Now: ', jst[-1])
             if jst[-1] <= self.last_time:
+                #print(self.symbol, 'Pass')
                 return
             else:
                 self.last_time = jst[-1]            
+        t1 = datetime.now()
         self.cypress.calc(dic)
+        t2 = datetime.now()
+        #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         ent = self.cypress.entries[-1]
         ext = self.cypress.exits[-1]
         if ent == Cypress.LONG:
@@ -233,7 +182,7 @@ class TradeBot:
             self.save_trade_manager()
         elif ent == Cypress.SHORT:
             self.entry(Signal.SHORT, jst[-1])
-            self.save_trade_manager
+            self.save_trade_manager()
         
     def mt5_position_num(self):
         positions = self.mt5.get_positions()
@@ -257,6 +206,8 @@ class TradeBot:
             if ret:
                 self.trade_manager.add_position(position_info)
                 self.debug_print('<Entry> signal', position_info.signal, position_info.symbol, position_info.entry_index, position_info.entry_time)
+            else:
+                self.debug_print('<Entry Error> signal', signal, sl, tp)
         except Exception as e:
             print(' ... Entry Error', e)
             print(position_info)
@@ -265,46 +216,6 @@ class TradeBot:
         positions = self.mt5.get_positions()
         self.trade_manager.remove_position_auto(positions)
         
-    def trailing(self):
-        trailing_stop = self.trade_param['trail_stop'] 
-        trail_target = self.trade_param['trail_target']
-        if trailing_stop == 0 or trail_target == 0:
-            return
-        remove_tickets = []
-        for ticket, info in self.trade_manager.positions.items():
-            price = self.mt5.current_price(info.signal())
-            triggered, profit, profit_max = info.update_profit(price)
-            if triggered:
-                self.debug_print('<Trailing fired> profit', profit_max)
-            if profit_max is None:
-                continue
-            if (profit_max - profit) > trailing_stop:
-                ret, info = self.mt5.close_by_position_info(info)
-                if ret:
-                    remove_tickets.append(info.ticket)
-                    self.debug_print('<Closed trailing stop> Success', self.symbol, info.desc())
-                else:
-                    self.debug_print('<Closed trailin stop> Fail', self.symbol, info.desc())    
-        for ticket in remove_tickets:
-            self.trade_manager.move_to_closed(ticket)
-        return len(remove_tickets) > 0
-                
-    def check_timeup(self, current_index: int):
-        positions = self.mt5.get_positions()
-        timelimit = int(self.trade_param['timelimit'])
-        remove_tickets = []
-        for position in positions:
-            if position.ticket in self.positions_info.keys():
-                info = self.positions_info[position.ticket]
-                if (current_index - info.entry_index) >= timelimit:
-                    ret, info = self.mt5.close_by_position_info(info)
-                    if ret:
-                        remove_tickets.append(position.ticket)
-                        self.debug_print('<Closed Timeup> Success', self.symbol, info.desc())
-                    else:
-                        self.debug_print('<Closed Timeup> Fail', self.symbol, info.desc())                                      
-        self.trade_manager.remove_positions(remove_tickets)
-       
     def close_positions(self, positions, signal):   
         removed_tickets = []
         for ticket, position in positions.items():
@@ -318,49 +229,35 @@ class TradeBot:
         self.trade_manager.remove_positions(removed_tickets)
 
 
-def load_params(symbol, timeframe, volume, position_max):
+def load_params(symbol, volume, position_max, strategy='Cypress'):
     def array_str2int(s):
         i = s.find('[')
         j = s.find(']')
         v = s[i + 1: j]
         return float(v)
     
-    path = f'./optimize2stage_2025_01_v2/sl_fix/best_trade_params.csv'
-    df = pd.read_csv(path)
+    path = f'./{strategy}/cypress_best_trade_params.xlsx'
+    df = pd.read_excel(path)
     df = df[df['symbol'] == symbol]
-    df = df[df['timeframe'] == timeframe]
-    row = df.iloc[0]
-    
-    
-    param1 = { 
-            'ma_long_period': row['ma_long_period'],
-            'ma_long_trend_th': row['ma_long_trend_th'],
-            'atr_period': row['atr_period'],
-            'atr_multiply': row['atr_multiply'],
-            'update_count': row['update_count'],
-            'atrp_period':40,
-            'profit_ma_period': 5,
-            'profit_target': [50, 100, 200, 300, 400],
-            'profit_drop':  [25, 50,   50, 100, 200]
-            }
-    param2 =  {
-            'strategy': 'anko',
-            'begin_hour': 0,
-            'begin_minute': 0,
-            'hours': 0,
-            'sl_method': Simulation.SL_FIX,
-            'sl_value': array_str2int(row['sl_value']),
-            'trail_target':0,
-            'trail_stop': 0, 
-            'volume': volume, 
-            'position_max': position_max, 
-            'timelimit': 0}
-    return param1, param2
-    
+    params = []
+    for i in range(len(df)):
+        row = df.iloc[i].to_dict()
+        param = CypressParam()
+        param.long_term = row['long_term']
+        param.short_term = row['short_term']
+        param.trend_slope_th = row['trend_slope_th']
+        param.tp = row['tp']
+        param.sl = row['sl']
+        param.volume = volume
+        param.position_max = position_max
+        params.append(param)
+    return params
 
 def create_bot(symbol, lot):
-    param = load_params(symbol)
-    param['lot'] = lot
+    params = load_params(symbol, lot, 10)
+    print(symbol, 'parameter num', len(params))
+    param = params[0]
+    param.volume = lot
     bot = TradeBot(symbol, param)    
     bot.set_sever_time(3, 2, 11, 1, 3.0)
     return bot
@@ -368,7 +265,7 @@ def create_bot(symbol, lot):
 def is_trade_time():
     now = datetime.now()
     begin = datetime(now.year, now.month, now.day, hour=8)
-    end = datetime(now.year, now.month, now.day, hour=0) + timedelta(days=1)
+    end = datetime(now.year, now.month, now.day, hour=7) + timedelta(days=1)
     return (now >= begin and now < end)
          
 def execute():
@@ -377,7 +274,7 @@ def execute():
                 ['NSDQ', 0.01],
             ]
     bots = {}
-    for i, (symbol, timeframe, lot) in enumerate(ITEMS):
+    for i, (symbol, lot) in enumerate(ITEMS):
         bot = create_bot(symbol, lot)
         if i == 0:
             Mt5Trade.connect()
@@ -387,9 +284,15 @@ def execute():
         
     while is_trade_time():
         for i, (symbol, lot) in enumerate(ITEMS):
-            scheduler.enter(10, 1 + 1, bots[symbol].update)
+            scheduler.enter(5, 1 + 1, bots[symbol].update)
             scheduler.run()
+            
+def test():
+    
+    params = load_params('NSDQ', 0.01, 20)
+    print(params)
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
     execute()
+    #test()

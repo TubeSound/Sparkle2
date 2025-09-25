@@ -18,6 +18,7 @@ UTC = tz.gettz('utc')
 from common import Columns, Indicators
 from html_writer import HtmlWriter
 
+from trade_bot import load_params
 from cypress import Cypress, CypressParam
 
 
@@ -143,17 +144,18 @@ def backtest(title, csv_path, tp, sl, graph_height):
     df_result = cypress.simulate_scalping_pips_multi(tp, sl)
     return fig , df_result
 
-
-
-
-def market_data_files(symbol):
+def market_data_files(symbol, timezone):
     timeframe = 'M1'
     year = 2025
     files = []
     for month in range(4, 10):
         mstr = str(month).zfill(2)
         fs = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
-        files += fs
+        for f in fs:
+            _, filename = os.path.split(f)
+            name, _ = os.path.splitext(filename)
+            if int(name[-1]) in timezone:
+                files.append(f)
     return files 
 
 def read_data_as_dic(csv_path):
@@ -174,14 +176,17 @@ def set_param(symbol, param):
     if symbol in ['NIKKEI', 'NSDQ', 'DOW']:
         param.tp = rand_step(10, 300, 10)
         param.sl = rand_step(10, 300, 10)
+    elif symbol in ['SP']:
+        param.tp = rand_step(2, 60, 2)
+        param.sl = rand_step(2, 60, 2)    
     elif symbol in ['XAUUSD']:
         param.tp = rand_step(1, 30, 1)
         param.sl = rand_step(1, 30, 1)        
 
-def optimizer(symbol, save_dir, repeat=2000):
+def optimizer(symbol, save_dir, timezone, repeat=2000):
     dir_path = os.path.join(save_dir, 'Optimize')
     os.makedirs(dir_path, exist_ok=True)
-    files = market_data_files(symbol)
+    files = market_data_files(symbol, timezone)
     if len(files) > 10:
         print('Optimize start', symbol)
     else:
@@ -361,8 +366,9 @@ def main(symbol, tp, sl, graph_height):
     save_result(symbol, '#0', df, dir_path)
 
         
-def test(symbol):
-    optimizer(symbol, f'./Cypress/{symbol}')
+def optimize(symbol, title, timezone):
+    print('Start', symbol, timezone)
+    optimizer(symbol, f'./Cypress/{symbol}/{title}', timezone)
 
 def loop():
     symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
@@ -382,9 +388,32 @@ def loop():
             tp = 20
         main(symbol,  tp, sl, height)    
     
+def test():
+    symbol = 'NIKKEI'
+    files = market_data_files(symbol, [1])
+    dic =  read_data_as_dic(files[0])
+    timestamp = dic['jst']
+    params = load_params(symbol, 0.1, 10, 'Cypress')
+    param = params[0]
+    cypress = Cypress(symbol, param)
+    cypress.calc(dic)
+    fig = plot_chart(symbol, timestamp, cypress, param.short_term, param.mid_term, param.long_term, 500)
+    trade = cypress.simulate_scalping()
+    df_trade = trade.df_position()
+    df_result = cypress.result_df()
+    
+    dir_path = f'./Cypress/debug'
+    os.makedirs(dir_path, exist_ok=True)
+    fig.savefig(os.path.join(dir_path, f'{symbol}.png'))
+    df_trade.to_csv(os.path.join(dir_path, f'{symbol}_trade.csv'), index=False)
+    df_result.to_csv(os.path.join(dir_path, f'{symbol}_data.csv'), index=False)
+    
+    
+    
     
     
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    test('XAUUSD')
+    #optimize('SP', "All", [1, 2, 3])
+    test()

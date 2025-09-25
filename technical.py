@@ -9,7 +9,8 @@ import statistics as stat
 from scipy.stats import rankdata
 from scipy.signal import find_peaks
 from sklearn.cluster import KMeans 
-from common import Indicators, Signal, Columns, UP, DOWN, HIGH, LOW, HOLD
+from common import Indicators, Columns, UP, DOWN, HIGH, LOW, HOLD
+from trade_manager import Signal
 from datetime import datetime, timedelta
 from dateutil import tz
 
