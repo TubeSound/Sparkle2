@@ -202,13 +202,13 @@ def optimizer(symbol, save_dir, timezone, repeat=2000):
         if param.long_term < param.short_term:
             continue   
  
-        cypress = Cypress(param)
+        cypress = Cypress(symbol, param)
         rows = []
         columns = []
         for file in files:
             dic = read_data_as_dic(file)
             cypress.calc(dic)
-            r, columns = cypress.simulate_scalping_pips_multi()
+            r, columns = cypress.simulate_scalping()
             if len(r) > 0:
                 rows += r
         df = pd.DataFrame(data=rows, columns=columns)
@@ -334,7 +334,7 @@ def save_profit_graph(symbol, title, df, dir_path):
     accum = np.cumsum(profits)
     df['profit_accum'] = accum
     fig, ax = makeFig(1, 1, (10, 5))
-    time = df['time_entry']
+    time = df['entry_time']
     ax.plot(time, df['profit_accum'], color='blue')
     title = f"{title} {symbol} Scalping Profit Curve"
     ax.set_title(title)
@@ -415,5 +415,5 @@ def test():
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    #optimize('SP', "All", [1, 2, 3])
-    test()
+    optimize('USDJPY', "1-3", [1, 2, 3])
+    #test()

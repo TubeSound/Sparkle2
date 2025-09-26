@@ -282,7 +282,9 @@ class Cypress:
         self.exit_signal = exit_signal
         self.reason = reason
         self.profits = profits
-        return manager
+        
+        
+        return manager.summary()
 
 
 

@@ -109,10 +109,13 @@ class PositionInfo:
         return s
     
     def array(self):
-        columns = ['symbol', 'type', 'volume', 'ticket', 'sl', 'tp', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'profit', 'closed', 'reason']
+        
         data = [self.symbol, self.order_type, self.volume, self.ticket, self.sl, self.tp, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, self.reason]
-        return data, columns
+        return data
 
+    @staticmethod
+    def array_columns():
+        return ['symbol', 'type', 'volume', 'ticket', 'sl', 'tp', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'profit', 'closed', 'reason']
 
 class TradeManager:
     def __init__(self, symbol, timeframe):
@@ -133,11 +136,12 @@ class TradeManager:
         
     def summary(self):
         out = []
+        columns = PositionInfo.array_columns()
         for ticket, pos in list(self.positions.items()) + list(self.positions_closed.items()):
-            d, columns = pos.array()
+            d = pos.array()
             out.append(d)
-        df = pd.DataFrame(data=out, columns=columns)
-        return df
+        #df = pd.DataFrame(data=out, columns=columns)
+        return out, columns
 
     def remove_positions(self, tickets):
         for ticket in tickets:

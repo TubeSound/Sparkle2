@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from mt5_trade import Mt5Trade, Columns
 import sched
 
-from trade_manager import PositionInfo, Signal
+from trade_manager import TradeManager, PositionInfo, Signal
 from time_utils import TimeUtils
 from utils import Utils
 from common import Indicators
@@ -72,7 +72,7 @@ class TradeBot:
         self.data_length = 60 * 8
         self.invterval_seconds = 10
         self.param = param
-        self.cypress = self.build_cypress(param)
+        self.cypress = cypress = Cypress(symbol, param)
         mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
         self.trade_manager = TradeManager(symbol, 'M1')
@@ -83,13 +83,13 @@ class TradeBot:
         self.server_timezone = None
         
     def build_cypress(self, param: dict):
-        p = CypressParam()
-        p.short_term = param['short_term']
-        p.long_term = param['long_term']
-        p.trend_slope_th = param['trend_slope_th']
-        p.sl = param['sl']
-        p.tp = param['tp']        
-        cypress = Cypress(p)
+        #p = CypressParam()
+        #p.short_term = param['short_term']
+        #p.long_term = param['long_term']
+        #p.trend_slope_th = param['trend_slope_th']
+        #p.sl = param['sl']
+        #p.tp = param['tp']        
+        cypress = Cypress(param)
         return cypress
         
         
@@ -177,10 +177,10 @@ class TradeBot:
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         ent = self.cypress.entries[-1]
         ext = self.cypress.exits[-1]
-        if ent == Cypress.LONG:
+        if ent == Signal.LONG:
             self.entry(Signal.LONG, jst[-1])
             self.save_trade_manager()
-        elif ent == Cypress.SHORT:
+        elif ent == Signal.SHORT:
             self.entry(Signal.SHORT, jst[-1])
             self.save_trade_manager()
         
@@ -193,10 +193,10 @@ class TradeBot:
         return count
         
     def entry(self, signal, time):
-        volume = self.param['volume']
-        sl = self.param['sl'] 
-        tp = self.param['tp']                      
-        position_max = int(self.param['position_max'])
+        volume = self.param.volume
+        sl = self.param.sl
+        tp = self.param.tp                     
+        position_max = int(self.para.position_max)
         num =  self.mt5_position_num()
         if num >= position_max:
             self.debug_print('<Entry> Request Canceled ', self.symbol, time,  'Position num', num)
@@ -236,7 +236,8 @@ def load_params(symbol, volume, position_max, strategy='Cypress'):
         v = s[i + 1: j]
         return float(v)
     
-    path = f'./{strategy}/cypress_best_trade_params.xlsx'
+    print( os.getcwd())
+    path = f'./{strategy}/cypress_best_params.xlsx'
     df = pd.read_excel(path)
     df = df[df['symbol'] == symbol]
     params = []
@@ -264,14 +265,14 @@ def create_bot(symbol, lot):
          
 def is_trade_time():
     now = datetime.now()
-    begin = datetime(now.year, now.month, now.day, hour=8)
-    end = datetime(now.year, now.month, now.day, hour=7) + timedelta(days=1)
-    return (now >= begin and now < end)
+    begin = datetime(now.year, now.month, now.day, hour=7)
+    end = datetime(now.year, now.month, now.day, hour=8) 
+    return not (now >= begin and now < end)
          
 def execute():
     ITEMS = [ 
                 ['NIKKEI', 0.01],
-                ['NSDQ', 0.01],
+                ['DOW', 0.01],
             ]
     bots = {}
     for i, (symbol, lot) in enumerate(ITEMS):
