@@ -50,9 +50,10 @@ class PositionInfo:
     STOP_LOSS = 2
     TRAILING_STOP = 3
     TIMEUP = 4
-    FORCE_CLOSE = 5
+    REVERSAL = 5
+    FORCE_CLOSE = 6
     
-    close_reason = {TAKE_PROFIT: 'TP', STOP_LOSS:'SL',  TRAILING_STOP: 'TRAIL', TIMEUP: 'TIMEUP', FORCE_CLOSE:'FORCE'}
+    close_reason = {TAKE_PROFIT: 'TP', STOP_LOSS:'SL',  TRAILING_STOP: 'TRAIL', TIMEUP: 'TIMEUP', REVERSAL: "REVERSAL", FORCE_CLOSE:'FORCE'}
         
     def __init__(self, symbol, order_type: int, time: datetime, volume, ticket, price, sl, tp, target_profit=0):
         self.symbol = symbol
@@ -63,6 +64,7 @@ class PositionInfo:
         self.entry_time = time
         self.entry_price = float(price)
         self.sl = sl        
+        self.sl_updated = False
         self.tp = tp
         if self.order_signal == Signal.LONG:
             self.sl_price =  None if sl is None else (price - sl)
@@ -133,6 +135,28 @@ class TradeManager:
             self.positions_closed[ticket] = pos
         else:
             print('move_to_closed, No tickt')
+            
+            
+    def calc_profit(self, price):
+        current = 0
+        win_num = 0
+        for ticket, position in self.positions.items():
+            if position.order_signal == Signal.LONG:
+                profit = price - position.entry_price
+            else:
+                profit =  position.entry_price - price
+            current += profit
+            if profit > 0:
+                win_num += 1
+        count = len(self.positions.items())
+        if count == 0:
+            win_rate = 0.0
+        else:
+            win_rate = float(win_num) / float(count)
+        closed = 0.0
+        for ticket, position in self.positions_closed.items():
+            closed += position.profit
+        return current + closed, current, closed, count, win_rate 
         
     def summary(self):
         out = []

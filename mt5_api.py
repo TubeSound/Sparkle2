@@ -23,7 +23,7 @@ def server_time(begin_month, begin_sunday, end_month, end_sunday, delta_hour_fro
     return dt, tz  
   
 def server_time_to_utc(time: datetime):
-    dt, tz = server_time(3, 2, 11, 1)
+    dt, tz = server_time(3, 2, 11, 1) # Axiory
     return time - dt
 
 def utc_to_server_time(utc: datetime): 
@@ -174,8 +174,9 @@ class Mt5Api:
         df = pd.DataFrame(data=data, columns = ['time', 'jst', 'id', 'symbol', 'type', 'close', 'reason', 'volume', 'price', 'profit'])
         return df
 
+
 def test1():
-    symbol = 'NSDQ'
+    symbol = 'US100'
     dirpath = f'./tmp/tickdata/{symbol}'
     os.makedirs(dirpath, exist_ok=True)
     
@@ -198,4 +199,4 @@ def test2():
 
 
 if __name__ == '__main__':
-    test2()
+    test1()

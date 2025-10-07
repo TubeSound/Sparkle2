@@ -196,13 +196,13 @@ class TradeBot:
         volume = self.param.volume
         sl = self.param.sl
         tp = self.param.tp                     
-        position_max = int(self.para.position_max)
+        position_max = int(self.param.position_max)
         num =  self.mt5_position_num()
         if num >= position_max:
             self.debug_print('<Entry> Request Canceled ', self.symbol, time,  'Position num', num)
             return
         try:
-            ret, position_info = self.mt5.entry(signal, time, volume, stoploss=sl, takeprofit=tp)
+            ret, position_info = self.mt5.entry(self.symbol, signal, time, volume, stoploss=sl, takeprofit=tp)
             if ret:
                 self.trade_manager.add_position(position_info)
                 self.debug_print('<Entry> signal', position_info.signal, position_info.symbol, position_info.entry_index, position_info.entry_time)
@@ -228,6 +228,16 @@ class TradeBot:
                     self.debug_print('<Closed> Fail', self.symbol, position.desc())           
         self.trade_manager.remove_positions(removed_tickets)
 
+    def close_all_positions(self):
+        removed_tickets = []
+        for ticket, position in self.trade_manager.open_positions():
+            ret, _ = self.mt5.close_by_position_info(position)
+            if ret:
+                removed_tickets.append(position.ticket)
+                self.debug_print('<Closed> Success', self.symbol, position.desc())
+            else:
+                self.debug_print('<Closed> Fail', self.symbol, position.desc())           
+        self.trade_manager.remove_positions(removed_tickets)
 
 def load_params(symbol, volume, position_max, strategy='Cypress'):
     def array_str2int(s):
@@ -269,6 +279,16 @@ def is_trade_time():
     end = datetime(now.year, now.month, now.day, hour=8) 
     return not (now >= begin and now < end)
          
+def is_close_time():
+    hours = [0, 7, 16]
+    now = datetime.now()
+    for hour in hours:
+        begin = datetime(now.year, now.month, now.day, hour=hour, minute=0)
+        end = datetime(now.year, now.month, now.day, hour=hour, minute=2)
+        if (now >= begin and now < end):
+            return True
+    return False
+         
 def execute():
     ITEMS = [ 
                 ['NIKKEI', 0.01],
@@ -283,17 +303,30 @@ def execute():
         bots[symbol ] = bot
         
         
-    while is_trade_time():
+    while True:
         for i, (symbol, lot) in enumerate(ITEMS):
-            scheduler.enter(5, 1 + 1, bots[symbol].update)
-            scheduler.run()
+            if is_close_time():
+                bots[symbol].close_all_positions()
+            else:   
+                scheduler.enter(5, 1 + 1, bots[symbol].update)
+                scheduler.run()
             
 def test():
     
     params = load_params('NSDQ', 0.01, 20)
     print(params)
+    
+    
+def test2():
+    symbol = 'JP225'
+    mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
+    Mt5Trade.connect()
+    mt5.set_symbol(symbol)
+    
+    mt5.set_sl(36958364, 48000)
+    
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
-    execute()
-    #test()
+    #execute()
+    test2()

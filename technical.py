@@ -68,10 +68,7 @@ def calc_ema(vector, window):
         out[i] = np.sum(d * weights)
     return out
 
-def calc_atr(dic, window, how='sma'):
-    hi = dic[Columns.HIGH]
-    lo = dic[Columns.LOW]
-    cl = dic[Columns.CLOSE]
+def calc_atr(hi, lo, cl, window, how='sma'):
     tr = true_range(hi, lo, cl)
     if how == 'sma':
         atr = calc_sma(tr, window)
@@ -609,3 +606,148 @@ def detect_edge(vector, value):
                 edge[i] = 1
                 active = False
     return edge
+
+
+def resample(df_m1, minutes):
+    """
+    rule: '5T', '15T', '1H' など（pandasのリサンプル規則）
+    """
+    
+    rule = {2: '2min', 5: '5min', 10: '10min', 15: '15min', 30: '30min', 60: '60min'}
+    
+    
+    agg = {
+        "open": "first", "high": "max", "low": "min", "close": "last"
+    }
+    
+    
+    #if not (minutes in rule.keys()):
+    #        raise Exception('Bad parameter in trend_heikin')
+        
+    df0 = df_m1.copy()
+    jst0 = pd.to_datetime(df0['jst'], format='ISO8601')
+    df0['jst'] = jst0
+    df0 = df0.set_index('jst')
+    df = df0[["open","high","low","close"]].resample(f"{minutes}min", label="right", closed="right").agg(agg)
+    df = df.dropna()
+    jst1 = list(df.index)
+    return df, jst0.to_list(), jst1
+    
+
+#　ローソク足の時間足変換
+def trend_heikin(df_m1: pd.DataFrame, minutes: int, threshold) -> pd.DataFrame:
+    df, jst0, jst1 = resample(df_m1, minutes)
+    op = df['open'].to_numpy()
+    hi = df['high'].to_numpy()
+    lo = df['low'].to_numpy()
+    cl = df['close'].to_numpy()
+    n1 = len(op)
+    dif = np.full(n1, np.nan)
+    trend1 = np.full(n1, 0)
+    no_trend1 = np.full(n1, 0)
+    for i in range(1, n1):
+        mean0 = np.mean([op[i - 1], hi[i - 1], lo[i - 1], cl[i - 1]])
+        mean1 = np.mean([op[i], hi[i], lo[i], cl[i]])
+        d = (mean1 - mean0) / cl[i - 1] * 100.0
+        dif[i] = float(d)
+        if abs(d) > threshold:
+            if d > 0:
+                trend1[i] = 1
+            else:
+                trend1[i] = -1
+        else:
+            no_trend1[i] = 1
+ 
+    n0 = len(jst0)
+    trend0 = np.full(n0, np.nan)
+    no_trend0 = np.full(n0, np.nan)
+    for i in range(n1):
+        for j in range(n0):
+            if jst0[j] == jst1[i]: 
+                trend0[j] = trend1[i]
+                no_trend0[j] = no_trend1[i]
+                break
+    for i in range(1, n0):
+        if np.isnan(trend0[i]):
+            trend0[i] = trend0[i - 1]
+            no_trend0[i] = no_trend0[i - 1]
+    return trend0, no_trend0
+
+def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply: float):
+    df, jst0, jst1 = resample(df_m1, minutes)
+    op = df['open'].to_numpy()
+    hi = df['high'].to_numpy()
+    lo = df['low'].to_numpy()
+    cl = df['close'].to_numpy()
+    n1 = len(op)
+    
+    atr = calc_atr(hi, lo, cl, atr_term)
+    bottom_line = np.full(n1, np.nan)
+    top_line = np.full(n1, np.nan)
+        
+    current = 0
+    trend1 = np.full(n1, 0)
+    trend_reversal = np.full(n1, 0)
+    for i in range(n1):
+        if i == 0:
+            current = 1 if cl[i] > op[i] else -1
+            continue
+        
+        if current == 1 and cl[i] < bottom_line[i - 1]:
+            current = -1
+            trend_reversal[i] = -1
+        elif current == -1 and cl[i] > top_line[i - 1]:
+            current = 1
+            trend_reversal[i] = 1
+
+        trend1[i] = current
+        if current == 1:
+            new_bottom = hi[i] - atr[i] * band_multiply
+            bottom_line[i] = max([new_bottom, bottom_line[i - 1]])
+        elif current == -1:
+            new_top = lo[i] + atr[i] * band_multiply
+            top_line[i] = min([new_top, top_line[i - 1]])
+
+    n0 = len(jst0)
+    trend0 = np.full(n0, np.nan)
+    top_line0 = np.full(n0, -1.0)
+    bottom_line0 = np.full(n0, -1.0)
+    trend_reversal0 = np.full(n0, 0)
+    for i in range(n1):
+        for j in range(n0):
+            if jst0[j] == jst1[i]: 
+                trend0[j] = trend1[i]
+                top_line0[j] = top_line[i]
+                bottom_line0[j] = bottom_line[i]
+                trend_reversal0[j] = trend_reversal[i]
+                break
+    for i in range(n0):
+        if np.isnan(trend0[i]):
+            trend0[i] = trend0[i - 1]
+        if top_line0[i] < 0:
+            top_line0[i] = top_line0[i - 1]
+        if bottom_line0[i] < 0:
+            bottom_line0[i] = bottom_line0[i - 1]
+            
+    for i in range(n0):
+        if top_line0[i] < 0:
+            top_line0[i] = np.nan
+        if bottom_line0[i] < 0:
+            bottom_line0[i] = np.nan
+    return trend0, trend_reversal0, top_line0, bottom_line0
+    
+    
+
+def test():
+    def read_data(path):
+        df = pd.read_csv(path)
+        return df
+    
+    df0 = read_data("../DayTradeData/M1/USDJPY/2025-08/USDJPY_M1_2025-08-01-1.csv") 
+    trend = trend_heikin(df0, 15, 0.01)
+    print(len(df0), len(trend))
+
+
+
+if __name__ == '__main__':
+    test()

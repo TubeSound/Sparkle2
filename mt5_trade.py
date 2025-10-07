@@ -174,8 +174,8 @@ class Mt5Trade:
         #print('エントリー ', request)
         return self.parse_order_result(result, time, stoploss, takeprofit)
     
-    def get_positions(self):
-        positions = mt5api.positions_get(symbol=self.symbol)
+    def get_positions(self, symbol):
+        positions = mt5api.positions_get(symbol=symbol)
         if positions is None:
             raise Exception('get position error')
         return positions
@@ -218,7 +218,7 @@ class Mt5Trade:
 
     def close_by_position_info(self, position_info: PositionInfo):
         tick = mt5api.symbol_info_tick(position_info.symbol)            
-        if self.is_long(position_info.type):
+        if position_info.order_signal == Signal.LONG:
             price = tick.bid
             typ = mt5api.ORDER_TYPE_SELL
         else:
@@ -242,7 +242,31 @@ class Mt5Trade:
         }
         result = mt5api.order_send(request)
         #print('決済', request)
-        return self.parse_order_result(result, None, None, None, None)
+        return self.parse_order_result(result, None, None, None)
+    
+    def modify_sl(self, symbol, ticket, sl_price):
+        positions =self.get_positions(symbol)
+        found = False
+        for position in positions:
+            if position.ticket == ticket:
+                found = True
+                break
+        
+        if not found:
+            print('Not found', symbol, ticket)
+            return
+    
+        request = {
+            "action": mt5api.TRADE_ACTION_SLTP,
+            "symbol": symbol,
+            "position": ticket,
+            "sl": float(sl_price),
+            "tp": float(position.tp)
+        }
+        
+        result = mt5api.order_send(request)
+        #print('Set SL', request, result)
+        return self.parse_order_result(result, None, None, None)
     
     def close_all_position(self):
         positions = self.get_positions()
@@ -372,12 +396,24 @@ def test1():
 def test2():
     trade = Mt5Trade(3, 2, 11, 1, 3.0)
     trade.connect()
-    df = trade.get_rates('NIKKEI', 'M1', 3)
+    df = trade.get_rates('US100', 'M1', 3)
     print(df[Columns.UTC], df[Columns.JST])
     
     
     now = datetime.now()
-    trade.entry('NIKKEI', Signal.LONG, now, 0.01, 100, 100)
+    trade.entry('US100', Signal.LONG, now, 0.01, 100, 100)
+
+
+def test3():
+    trade = Mt5Trade(3, 2, 11, 1, 3.0)
+    trade.connect()
+    df = trade.get_rates('US100', 'M1', 3)
+    print(df[Columns.UTC], df[Columns.JST])
+    
+    
+    now = datetime.now()
+    trade.set_sl('US100', 36963537, 24500)
+
 
 if __name__ == '__main__':
-    test2()
+    test3()
