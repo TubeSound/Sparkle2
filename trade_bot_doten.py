@@ -17,7 +17,7 @@ from time_utils import TimeUtils
 from utils import Utils
 from common import Indicators
 
-from maron import Maron, MaronParam
+from maron_pie import MaronPie, MaronPieParam
 
 
 JST = tz.gettz('Asia/Tokyo')
@@ -73,11 +73,10 @@ class TradeBot:
         self.data_length = 60 * 8
         self.invterval_seconds = 10
         self.param = param
-        if strategy == 'Maron':
-            self.act = Maron(symbol, param)
+        if strategy == 'MaronPie':
+            self.act = MaronPie(symbol, param)
         mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
-        #self.trade_manager = TradeManager(symbol, 'M1')
         self.trade_manager = self.load_trade_manager()
         
         self.last_time = None
@@ -169,8 +168,11 @@ class TradeBot:
         self.act.calc(df)
         t2 = datetime.now()
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
-        ent = self.act.entries[-1]
+        
+        # ドテン
         ext = self.act.exits[-1]
+        self.doten(ext)
+        ent = self.act.entries[-1]     
         if ent == Signal.LONG:
             self.entry(Signal.LONG, jst[-1])
             self.save_trade_manager()
@@ -178,6 +180,32 @@ class TradeBot:
             self.entry(Signal.SHORT, jst[-1])
             self.save_trade_manager()
         
+    def doten(self, signal):
+        if signal == 0:
+            return
+        for ticket, position in self.trade_manager.positions.items():
+            if signal == 1:
+                # down -> up
+                if position.order_signal == Signal.SHORT:
+                    self.close_position(position)
+            elif signal == -1:
+                # up ->down
+                if position.order_signal == Signal.LONG:
+                    self.close_position(position)
+        
+    def close_position(self, position: PositionInfo):
+        ret, _ = self.mt5.close_by_position_info(position)
+        if ret:
+            self.debug_print('<Closed> Success', self.symbol, position.desc())
+            self.trade_manager.remove_positions([position.ticket])
+        else:
+            self.debug_print('<Closed> Fail', self.symbol, position.desc())           
+        return ret
+    
+    def close_all_positions(self):
+        for ticket, position in self.trade_manager.positions.items():
+            self.close_position(position)
+                
     def update_sl(self):
         for ticket, position in self.trade_manager.open_positions().items():
             if (self.param.sl_loose is not None) and (position.sl_updated is False):
@@ -221,32 +249,7 @@ class TradeBot:
             print(' ... Entry Error', e)
             print(position_info)
             
-    def remove_closed_positions(self):
-        positions = self.mt5.get_positions(self.symbol)
-        self.trade_manager.remove_position_auto(positions)
-        
-    def close_positions(self, positions, signal):   
-        removed_tickets = []
-        for ticket, position in positions.items():
-            if position.signal() == signal:
-                ret, _ = self.mt5.close_by_position_info(position)
-                if ret:
-                    removed_tickets.append(position.ticket)
-                    self.debug_print('<Closed> Success', self.symbol, position.desc())
-                else:
-                    self.debug_print('<Closed> Fail', self.symbol, position.desc())           
-        self.trade_manager.remove_positions(removed_tickets)
 
-    def close_all_positions(self):
-        removed_tickets = []
-        for ticket, position in self.trade_manager.open_positions().items():
-            ret, _ = self.mt5.close_by_position_info(position)
-            if ret:
-                removed_tickets.append(position.ticket)
-                self.debug_print('<Closed> Success', self.symbol, position.desc())
-            else:
-                self.debug_print('<Closed> Fail', self.symbol, position.desc())           
-        self.trade_manager.remove_positions(removed_tickets)
 
 def load_params(strategy, symbol, volume, position_max):
     def array_str2int(s):
@@ -262,8 +265,8 @@ def load_params(strategy, symbol, volume, position_max):
     params = []
     for i in range(len(df)):
         row = df.iloc[i].to_dict()
-        if strategy == 'Maron':
-            param = MaronParam.load_from_dic(row)
+        if strategy == 'MaronPie':
+            param = MaronPieParam.load_from_dic(row)
             params.append(param)      
         else:
             raise Exception('No definition ' + strategy)
@@ -318,7 +321,7 @@ def test():
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
-    strategy = 'Maron'
+    strategy = 'MaronPie'
     items = [    # [symbol, volume, sl_loose]
                 ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
