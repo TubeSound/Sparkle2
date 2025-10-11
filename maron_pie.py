@@ -29,6 +29,7 @@ class MaronPieParam:
                 'atr_shift_multiply': self.atr_shift_multiply,
                 'supertrend_atr_term': self.supertrend_atr_term, 
                 'supertrend_minutes': self.supertrend_minutes,
+                'supertrend_multiply':self.supertrend_multiply,
                 'heikin_minutes': self.heikin_minutes,
                 'heikin_threshold': self.heikin_threshold,
                 'sl': self.sl,
@@ -47,6 +48,7 @@ class MaronPieParam:
         param.atr_shift_multiply = float(dic['atr_shift_multiply'])
         param.supertrend_atr_term = int(dic['supertrend_atr_term'])
         param.supertrend_minutes = int(dic['supertrend_minutes'])
+        param.supertrend_multiply = float(dic['supertrend_multiply'])
         param.heikin_minutes = int(dic['heikin_minutes'])
         param.heikin_threshold = float(dic['heikin_threshold'])
         param.heikin_minutes = int(dic['heikin_minutes'])
@@ -56,7 +58,7 @@ class MaronPieParam:
         else:
             param.sl_loose = float(dic['sl_loose'])
         param.position_max = int(dic['position_max'])
-        param.volume = int(dic['volume'])
+        param.volume = float(dic['volume'])
         return param    
         
 class MaronPie:

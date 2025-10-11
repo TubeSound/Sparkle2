@@ -70,7 +70,7 @@ class TradeBot:
         self.strategy = strategy
         self.symbol = symbol
         self.timeframe = 'M1'
-        self.data_length = 60 * 8
+        self.data_length =  2 * 24 * 60
         self.invterval_seconds = 10
         self.param = param
         if strategy == 'MaronPie':
@@ -325,7 +325,6 @@ if __name__ == '__main__':
     items = [    # [symbol, volume, sl_loose]
                 ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
-                ['US30', 1],
                 ['JP225', 10], 
                 ['US100', 1],
             ]

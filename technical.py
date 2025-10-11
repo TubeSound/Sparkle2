@@ -689,10 +689,16 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
     trend1 = np.full(n1, 0)
     trend_reversal = np.full(n1, 0)
     for i in range(n1):
-        if i == 0:
-            current = 1 if cl[i] > op[i] else -1
+        if np.isnan(atr[i]):
             continue
-        
+        else:
+            if current == 0:
+                if cl[i] > op[i]:
+                    current = 1
+                else:
+                    current = -1
+                trend1[i] = current
+                continue
         if current == 1 and cl[i] < bottom_line[i - 1]:
             current = -1
             trend_reversal[i] = -1

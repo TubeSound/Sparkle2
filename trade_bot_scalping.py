@@ -70,7 +70,7 @@ class TradeBot:
         self.strategy = strategy
         self.symbol = symbol
         self.timeframe = 'M1'
-        self.data_length = 60 * 8
+        self.data_length =  2 * 24 * 60
         self.invterval_seconds = 10
         self.param = param
         if strategy == 'Maron':
@@ -116,11 +116,15 @@ class TradeBot:
             with open(path, 'rb') as f:
                 trade_manager = pickle.load(f)
             print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(self.trade_manager.positions))
-        except:
+        except Exception as e:
+            print(e)
             trade_manager = TradeManager(self.symbol, self.timeframe)
         return trade_manager
             
     def save_trade_manager(self):
+        if self.trade_manager is None:
+            print('No trade manager')
+            return
         path, dir_path = self.backup_path()
         os.makedirs(dir_path, exist_ok=True)
         with open(path, 'wb') as f:
@@ -285,11 +289,11 @@ def is_trade_time():
     return not (now >= begin and now < end)
          
 def is_close_time():
-    hours = [0, 7, 16]
+    hours = [0, 6, 16]
     now = datetime.now()
     for hour in hours:
-        begin = datetime(now.year, now.month, now.day, hour=hour, minute=0)
-        end = datetime(now.year, now.month, now.day, hour=hour, minute=2)
+        end = datetime(now.year, now.month, now.day, hour=hour, minute=1)
+        begin = end - timedelta(minutes=1)
         if (now >= begin and now < end):
             return True
     return False
@@ -306,6 +310,7 @@ def execute(strategy, items):
     while True:
         for i, (symbol, lot) in enumerate(items):
             if is_close_time():
+                print('All close')
                 bots[symbol].close_all_positions()
             else:   
                 scheduler.enter(5, 1 + 1, bots[symbol].update)

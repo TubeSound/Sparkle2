@@ -209,12 +209,12 @@ def set_param(symbol:str, param: MaronPieParam):
     param.atr_term = rand_step(4, 30, 2)
     param.atr_shift_multiply = rand_step(0.2, 3.0, 0.2)
     param.supertrend_atr_term = rand_step(5, 40, 5)
-    param.supertrend_minutes = rand_select([2, 3, 4, 5, 10, 15, 30, 60])
+    param.supertrend_minutes = rand_select([2, 3, 4, 5, 10, 15, 30])
     param.supertrend_multiply = rand_step(0.2, 3.0, 0.2)
     param.heikin_threshold = rand_step(0.01, 0.1, 0.01)
-    param.heikin_minutes = rand_select([10, 15, 30, 60, 90, 120])
+    param.heikin_minutes = rand_select([30, 60, 90, 120])
    
-    if symbol in ['NIKKEI', 'NSDQ', 'DOW']:
+    if symbol in ['JP225', 'US100', 'US30']:
         param.sl = rand_step(40, 400, 20)
     elif symbol in ['SP']:
         param.sl = rand_step(2, 60, 2)   
@@ -226,7 +226,7 @@ def set_param(symbol:str, param: MaronPieParam):
 def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     df0 = pd.DataFrame(dic)
     df =  df0[(df0['jst'] >= tbegin) & (df0['jst'] <= tend)]
-    hours = [[0, 7], [8, 16], [16, 0]]
+    hours = [[0, 6], [8, 8], [16, 8]]
     
     i = 0
     result = []
@@ -238,20 +238,30 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
         rows = []
         columns = []
         t = tbegin
+        length = 2 * 24 * 60
         while t <= tend:
-            t0 = t - timedelta(days=3)
+            t0 = t - timedelta(days=10)
             t1 = t + timedelta(days=1)
-            df1 = df[(df['jst'] >= t0) & (df['jst'] < t1)]
-            maron.calc(df1)
-            for b, e in hours:
+            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
+            if len(df1) < length:
+                t += timedelta(days=1)
+                continue
+            index = df1.index[-1]   
+            if index - length < 0:
+                t += timedelta(days=1)
+                continue
+            df2 = df0[index - length: index + 1]            
+            maron.calc(df2)
+            for b, l in hours:
                 t0 = t
                 t0 = t0.replace(hour=b)
-                t1 = t
-                t1 = t1.replace(hour=e)
+                t1 = t0 + timedelta(hours=l)
                 (r, columns), _ = maron.simulate_doten(t0, t1)
                 if len(r) > 0:
                     rows += r
             t += timedelta(days=1)
+        if len(rows) == 0:
+            continue
         df_metric = pd.DataFrame(data=rows, columns=columns)
         metric = performance(df_metric)
         d1 = param.to_dict()
@@ -261,7 +271,7 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
         result.append(dic)
         print('MaronPie Optimize Phase1', i, symbol, 'profit:', metric['profit'])
         i += 1
-    
+        
     keys = list(result[0].keys())
     dic = {}
     for key in ['symbol'] + keys:
@@ -281,7 +291,7 @@ def evaluate(symbol, params, dir_path):
     dic = load_all_data(symbol)
     df = pd.DataFrame(dic)
     jst = dic['jst']
-    hours = [[0, 7], [8, 8], [16, 8]]
+    hours = [[0, 6], [8, 8], [16, 8]]
     tbegin = jst[0]
     tend = jst[-1]
 
@@ -291,14 +301,20 @@ def evaluate(symbol, params, dir_path):
         maron = MaronPie(symbol, param)
         rows = []
         t = tbegin
+        length = 2 * 24 * 60
         while t <= tend:
             t0 = t - timedelta(days=3)
             t1 = t + timedelta(days=1)
-            df1 = df[(df['jst'] >= t0) & (df['jst'] < t1)]
-            if len(df1) < 100:
+            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
+            if len(df1) < length:
                 t += timedelta(days=1)
                 continue
-            maron.calc(df1)
+            index = df1.index[-1]   
+            if index - length < 0:
+                t += timedelta(days=1)
+                continue
+            df2 = df.iloc[index - length: index + 1, :]      
+            maron.calc(df2)
             for b, l in hours:
                 t0 = t
                 t0 = t0.replace(hour=b)
@@ -313,6 +329,9 @@ def evaluate(symbol, params, dir_path):
                     pass
                     #print(symbol, t0, t1, 'MaronPie Optimize 2nd done ... No Trade')
             t += timedelta(days=1)
+            
+        if len(rows) == 0:
+            continue
         df_metric = pd.DataFrame(data=rows, columns=columns)
         metric = performance(df_metric)
         d1 = param.to_dict()
@@ -465,7 +484,7 @@ def optimize(symbol):
     tbegin = datetime(2024, 5, 16).astimezone(JST)
     tend = datetime(2024, 9, 30).astimezone(JST)
     df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
-    df = df.head(100)
+    df = df.head(50)
     print(df)
     dirpath = f'./MaronPie/Optimize2/{symbol}'
     os.makedirs(dirpath, exist_ok=True)
@@ -498,24 +517,38 @@ def loop():
         main(symbol,  tp, sl, height)    
     
 def test():
-    symbol = 'XAUUSD'
+    symbol = 'JP225'
     dic = load_all_data(symbol)
     df0 = pd.DataFrame(dic)
-    t0 = datetime(2025, 10, 6, 8).astimezone(JST)
-    t1 = datetime(2025, 10, 6, 18).astimezone(JST)
-    df = df0[(df0['jst'] >= t0) & (df0['jst'] <= t1)]
+    t0 = datetime(2025, 10, 3, 8).astimezone(JST)
+    t1 = datetime(2025, 10, 3, 18).astimezone(JST)
+    df1 = df0[(df0['jst'] >= t0) & (df0['jst'] <= t1)]
+    index = df1.index[-1]
+    length = 60 * 24 * 2
+    df = df0.iloc[index - length: index + 1, :]
     jst = df['jst'].to_list()
     param = MaronPieParam()
+    param.ma_term = 14
+    param.ma_method = "sma"
+    param.atr_term = 24
+    param.atr_shift_multiply= 0.2
+    param.supertrend_atr_term = 30
+    param.supertrend_minutes = 15
+    param.supertrend_multiply = 2.0
+    param.heikin_minutes = 60
+    param.heikin_threshold  = 0.03
+    param.sl = 10
+
     maron = MaronPie(symbol, param)
     maron.calc(df)
-    fig = plot_chart(symbol, jst, maron, param, 100)
+    fig = plot_chart(symbol, jst, maron, param, 2000)
     os.makedirs('./debug', exist_ok=True)
-    fig.savefig('./debug/xauusd.png')
+    fig.savefig('./debug/jp225.png')
     
-    (r, columns),df_profit = maron.simulate_doten(jst[0], jst[-1])
+    (r, columns),df_profit = maron.simulate_doten(t0, t1)
     df_metric = pd.DataFrame(data=r, columns=columns)
-    df_metric.to_csv('./debug/trade_xauusd.csv', index=False)  
-    df_profit.to_csv('./debug/xauusd_profit.csv', index=False)
+    df_metric.to_csv('./debug/trade_jp225.csv', index=False)  
+    df_profit.to_csv('./debug/jp225_profit.csv', index=False)
     
     
 def test2():

@@ -46,7 +46,7 @@ class MaronParam:
         param.upper_timeframe = int(dic['upper_timeframe'])
         param.sl = float(dic['sl'])
         param.tp = float(dic['tp'])
-        if dic['sl_loose'] == '':
+        if dic['sl_loose'] == None:
             param.sl_loose = None
         else:
             param.sl_loose = float(dic['sl_loose'])

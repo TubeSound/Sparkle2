@@ -243,23 +243,23 @@ def set_param(symbol:str, param: MaronParam):
     param.upper_timeframe = rand_select([5, 10, 15, 30, 60])
     param.atr_shift_multiply = rand_step(0.4, 4.0, 0.2)
     param.ma_method = rand_select(['sma', 'ema'])
-    if symbol in ['NIKKEI', 'NSDQ', 'DOW']:
-        param.tp = rand_step(10, 300, 10)
-        param.sl = rand_step(10, 300, 10)
-    elif symbol in ['SP']:
-        param.tp = rand_step(2, 60, 2)
-        param.sl = rand_step(2, 60, 2)   
+    if symbol in ['JP225', 'US100', 'US30']:
+        param.tp = rand_step(20, 100, 10)
+        param.sl = rand_step(20, 60, 10)
+    elif symbol in ['US500']:
+        param.tp = rand_step(2, 10, 2)
+        param.sl = rand_step(2, 5, 2)   
     elif symbol in ['XAUUSD']:
-        param.tp = rand_step(1, 30, 1)
-        param.sl = rand_step(1, 30, 1)        
+        param.tp = rand_step(0.2, 2, 0.1)
+        param.sl = rand_step(0.2, 2, 0.1)        
     elif symbol in ['USDJPY']:
-        param.tp = rand_step(0.01, 0.5, 0.01)
-        param.sl = rand_step(0.01, 0.5, 0.01)
+        param.tp = rand_step(0.01, 0.05, 0.01)
+        param.sl = rand_step(0.01, 0.05, 0.01)
 
 def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     df0 = pd.DataFrame(dic)
     df =  df0[(df0['jst'] >= tbegin) & (df0['jst'] <= tend)]
-    hours = [[0, 7], [8, 16], [16, 0]]
+    hours = [[0, 6], [8, 8], [16, 8]]
     
     i = 0
     result = []
@@ -271,20 +271,30 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
         rows = []
         columns = []
         t = tbegin
+        length = 2 * 24 * 60
         while t <= tend:
-            t0 = t - timedelta(days=3)
+            t0 = t - timedelta(days=10)
             t1 = t + timedelta(days=1)
-            df1 = df[(df['jst'] >= t0) & (df['jst'] < t1)]
-            maron.calc(df1)
-            for b, e in hours:
+            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
+            if len(df1) < length:
+                t += timedelta(days=1)
+                continue
+            index = df1.index[-1]   
+            if index - length < 0:
+                t += timedelta(days=1)
+                continue
+            df2 = df0[index - length: index + 1]            
+            maron.calc(df2)
+            for b, l in hours:
                 t0 = t
                 t0 = t0.replace(hour=b)
-                t1 = t
-                t1 = t1.replace(hour=e)
-                r, columns = maron.simulate_scalping(t0, t1)
+                t1 = t0 + timedelta(hours=l)
+                (r, columns) = maron.simulate_scalping(t0, t1)
                 if len(r) > 0:
                     rows += r
             t += timedelta(days=1)
+        if len(rows) == 0:
+            continue
         df_metric = pd.DataFrame(data=rows, columns=columns)
         metric = performance(df_metric)
         d1 = param.to_dict()
@@ -314,7 +324,7 @@ def evaluate(symbol, params, dir_path):
     dic = load_all_data(symbol)
     df = pd.DataFrame(dic)
     jst = dic['jst']
-    hours = [[0, 7], [8, 8], [16, 8]]
+    hours = [[0, 6], [8, 8], [16, 8]]
     tbegin = jst[0]
     tend = jst[-1]
 
@@ -324,28 +334,37 @@ def evaluate(symbol, params, dir_path):
         maron = Maron(symbol, param)
         rows = []
         t = tbegin
+        length = 2 * 24 * 60
         while t <= tend:
             t0 = t - timedelta(days=3)
             t1 = t + timedelta(days=1)
-            df1 = df[(df['jst'] >= t0) & (df['jst'] < t1)]
-            if len(df1) < 100:
+            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
+            if len(df1) < length:
                 t += timedelta(days=1)
                 continue
-            maron.calc(df1)
+            index = df1.index[-1]   
+            if index - length < 0:
+                t += timedelta(days=1)
+                continue
+            df2 = df.iloc[index - length: index + 1, :]      
+            maron.calc(df2)
             for b, l in hours:
                 t0 = t
                 t0 = t0.replace(hour=b)
                 t1 = t0 + timedelta(hours=l)
                 if t0 == datetime(2021,1,2, 16).astimezone(JST):
                     pass #debug
-                r, columns = maron.simulate_scalping(t0, t1)
+                (r, columns)  = maron.simulate_scalping(t0, t1)
                 if len(r) > 0:
                     rows += r
-                    #print(symbol, t0, t1, 'Maron Optimize 2nd done')
+                    #print(symbol, t0, t1, 'MaronPie Optimize 2nd done')
                 else:
                     pass
-                    #print(symbol, t0, t1, 'Maron Optimize 2nd done ... No Trade')
+                    #print(symbol, t0, t1, 'MaronPie Optimize 2nd done ... No Trade')
             t += timedelta(days=1)
+            
+        if len(rows) == 0:
+            continue
         df_metric = pd.DataFrame(data=rows, columns=columns)
         metric = performance(df_metric)
         d1 = param.to_dict()
@@ -493,10 +512,10 @@ def optimize(symbol):
     dic = load_all_data(symbol)
     tbegin = datetime(2024, 5, 16).astimezone(JST)
     tend = datetime(2024, 9, 30).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
+    df = optimizer(symbol, dic, tbegin, tend, repeat=2000)
     df = df.head(100)
     print(df)
-    dirpath = f'./Maron/Optimize2/{symbol}'
+    dirpath = f'./Maron/v2/Optimize2/{symbol}'
     os.makedirs(dirpath, exist_ok=True)
     
     params = []
