@@ -11,9 +11,9 @@ class MaronPieParam:
     ma_method = 'ema'
     atr_term = 6
     atr_shift_multiply = 0.6
-    supertrend_atr_term = 20
-    supertrend_minutes = 5
-    supertrend_multiply = 2.0
+    supertrend_atr_term = 10
+    supertrend_minutes = 15
+    supertrend_multiply = 3.5
     heikin_minutes = 60
     heikin_threshold = 0.04
     sl = 0.5

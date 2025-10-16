@@ -553,7 +553,7 @@ def test():
     param = MaronParam()
     maron = Maron(symbol, param)
     maron.calc(df)
-    fig = plot_chart(symbol, jst, maron, param, 200)
+    fig = plot_chart(symbol, jst, maron, param, 50)
     os.makedirs('./debug', exist_ok=True)
     fig.savefig('./debug/nsdq.png')
     
@@ -566,5 +566,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('USDJPY')
+    optimize('US30')
     #test2()

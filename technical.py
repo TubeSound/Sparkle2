@@ -674,7 +674,13 @@ def trend_heikin(df_m1: pd.DataFrame, minutes: int, threshold) -> pd.DataFrame:
     return trend0, no_trend0
 
 def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply: float):
-    df, jst0, jst1 = resample(df_m1, minutes)
+    if minutes == 1:
+        df = df_m1
+        jst = df['jst'].to_list()
+        jst0 = jst[0]
+        jst1 = jst[-1]    
+    else:
+        df, jst0, jst1 = resample(df_m1, minutes)
     op = df['open'].to_numpy()
     hi = df['high'].to_numpy()
     lo = df['low'].to_numpy()
@@ -713,6 +719,9 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
         elif current == -1:
             new_top = lo[i] + atr[i] * band_multiply
             top_line[i] = min([new_top, top_line[i - 1]])
+
+    if minutes == 1:
+        return trend1, trend_reversal, top_line, bottom_line
 
     n0 = len(jst0)
     trend0 = np.full(n0, np.nan)

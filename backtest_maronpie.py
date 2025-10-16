@@ -204,18 +204,18 @@ def load_all_data(symbol):
     return dic
         
 def set_param(symbol:str, param: MaronPieParam):
-    param.ma_term = rand_step(4, 30, 2)
-    param.ma_method = rand_select(['sma', 'ema'])
-    param.atr_term = rand_step(4, 30, 2)
-    param.atr_shift_multiply = rand_step(0.2, 3.0, 0.2)
+    param.ma_term = rand_step(5, 30, 5)
+    param.ma_method = 'ema'
+    param.atr_term = param.ma_term
+    param.atr_shift_multiply = rand_step(1.0, 5.0, 0.2)
     param.supertrend_atr_term = rand_step(5, 40, 5)
-    param.supertrend_minutes = rand_select([2, 3, 4, 5, 10, 15, 30])
-    param.supertrend_multiply = rand_step(0.2, 3.0, 0.2)
-    param.heikin_threshold = rand_step(0.01, 0.1, 0.01)
-    param.heikin_minutes = rand_select([30, 60, 90, 120])
+    param.supertrend_minutes = 1 # rand_select([10, 15, 30])
+    param.supertrend_multiply = rand_step(1.0, 5.0, 0.2)
+    param.heikin_threshold = rand_step(0.01, 0.5, 0.01)
+    param.heikin_minutes = rand_select([60, 90, 120])
    
     if symbol in ['JP225', 'US100', 'US30']:
-        param.sl = rand_step(40, 400, 20)
+        param.sl = rand_step(40, 200, 20)
     elif symbol in ['SP']:
         param.sl = rand_step(2, 60, 2)   
     elif symbol in ['XAUUSD']:
@@ -287,7 +287,7 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     return df_result
     
     
-def evaluate(symbol, params, dir_path):
+def evaluate(symbol, ver, params, dir_path):
     dic = load_all_data(symbol)
     df = pd.DataFrame(dic)
     jst = dic['jst']
@@ -356,7 +356,7 @@ def evaluate(symbol, params, dir_path):
         dic[key] = array
     df_result = pd.DataFrame(dic)
     df_result = df_result.sort_values('profit', ascending=False)
-    df_result.to_excel(os.path.join(dir_path, f'{symbol}_optimized_trade_params.xlsx'), index=False)
+    df_result.to_excel(os.path.join(dir_path, f'{symbol}_v{ver}_trade_params.xlsx'), index=False)
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for signal, label, color in zip(signals, labels, colors):
@@ -478,7 +478,7 @@ def main(symbol, tp, sl, graph_height):
     save_result(symbol, '#0', df, dir_path)
 
         
-def optimize(symbol):
+def optimize(symbol, ver):
     print('Start', symbol)
     dic = load_all_data(symbol)
     tbegin = datetime(2024, 5, 16).astimezone(JST)
@@ -486,15 +486,17 @@ def optimize(symbol):
     df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
     df = df.head(50)
     print(df)
-    dirpath = f'./MaronPie/Optimize2/{symbol}'
+    dirpath = f'./MaronPie/v{ver}/Optimize2/{symbol}'
     os.makedirs(dirpath, exist_ok=True)
+    df.to_excel(os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx"))
+    
     
     params = []
     for i in range(len(df)):
         d = df.iloc[i, :]
         p = MaronPieParam.load_from_dic(d.to_dict())
         params.append(p)
-    evaluate(symbol, params, dirpath)
+    evaluate(symbol, ver, params, dirpath)
     
     
 
@@ -559,5 +561,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('USDJPY')
+    optimize('USDJPY', 3)
     #test()
