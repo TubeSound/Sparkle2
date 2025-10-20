@@ -203,25 +203,27 @@ def load_all_data(symbol):
             pickle.dump(dic, f)
     return dic
         
-def set_param(symbol:str, param: MaronPieParam):
-    param.ma_term = rand_step(5, 30, 5)
+def generate_param(symbol:str, param: MaronPieParam):
+    param.ma_term = rand_step(10, 30, 5)
     param.ma_method = 'ema'
-    param.atr_term = param.ma_term
+    param.atr_term = rand_step(5, 30, 5)
     param.atr_shift_multiply = rand_step(1.0, 5.0, 0.2)
     param.supertrend_atr_term = rand_step(5, 40, 5)
-    param.supertrend_minutes = 1 # rand_select([10, 15, 30])
-    param.supertrend_multiply = rand_step(1.0, 5.0, 0.2)
-    param.heikin_threshold = rand_step(0.01, 0.5, 0.01)
+    param.supertrend_minutes = rand_step(1, 5, 1)
+    param.supertrend_multiply = rand_step(2.0, 5.0, 0.2)
+    param.heikin_threshold = rand_step(0.01, 0.2, 0.01)
     param.heikin_minutes = rand_select([60, 90, 120])
    
-    if symbol in ['JP225', 'US100', 'US30']:
-        param.sl = rand_step(40, 200, 20)
+    if symbol in ['JP225', 'US30']:
+        param.sl = rand_step(40, 100, 20)
+    elif symbol in ['US100']:
+        param.sl = rand_step(30, 80, 10)
     elif symbol in ['SP']:
-        param.sl = rand_step(2, 60, 2)   
+        param.sl = rand_step(2, 30, 2)   
     elif symbol in ['XAUUSD']:
-        param.sl = rand_step(1, 30, 1)        
+        param.sl = rand_step(1, 10, 1)        
     elif symbol in ['USDJPY']:
-        param.sl = rand_step(0.01, 0.5, 0.01)
+        param.sl = rand_step(0.01, 0.2, 0.01)
 
 def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     df0 = pd.DataFrame(dic)
@@ -233,7 +235,7 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     #for short_term, long_term, th, sl, tp in itertools.product(short_terms, long_terms, ths, sls, tps):
     for _ in range(repeat):                   
         param = MaronPieParam()
-        set_param(symbol, param)
+        generate_param(symbol, param)
         maron = MaronPie(symbol, param)
         rows = []
         columns = []
@@ -346,17 +348,19 @@ def evaluate(symbol, ver, params, dir_path):
     
     keys = list(result[0].keys())
     dic = {}
-    for key in ['symbol'] + keys:
+    for key in ['symbol', 'version'] + keys:
         array = []
         for d in result:
             if key == 'symbol':
                 array.append(symbol)
+            elif key == 'version':
+                array.append(ver)
             else:
                 array.append(d[key])
         dic[key] = array
     df_result = pd.DataFrame(dic)
     df_result = df_result.sort_values('profit', ascending=False)
-    df_result.to_excel(os.path.join(dir_path, f'{symbol}_v{ver}_trade_params.xlsx'), index=False)
+    df_result.to_excel(os.path.join(dir_path, f'{symbol}_v{ver}_best_trade_params.xlsx'), index=False)
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for signal, label, color in zip(signals, labels, colors):
@@ -481,8 +485,12 @@ def main(symbol, tp, sl, graph_height):
 def optimize(symbol, ver):
     print('Start', symbol)
     dic = load_all_data(symbol)
-    tbegin = datetime(2024, 5, 16).astimezone(JST)
-    tend = datetime(2024, 9, 30).astimezone(JST)
+    if ver >= 4:
+        tbegin = datetime(2025, 2, 3).astimezone(JST)
+        tend = datetime(2025, 4, 26).astimezone(JST)
+    else:
+        tbegin = datetime(2024, 5, 16).astimezone(JST)
+        tend = datetime(2024, 9, 30).astimezone(JST)
     df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
     df = df.head(50)
     print(df)
@@ -498,7 +506,19 @@ def optimize(symbol, ver):
         params.append(p)
     evaluate(symbol, ver, params, dirpath)
     
-    
+
+def optimize2(symbol, ver):
+    dirpath = f'./MaronPie/v{ver}/Optimize2/{symbol}'
+    df = pd.read_excel(os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx"), sheet_name='Sheet1')
+    params = []
+    for i in range(len(df)):
+        if i == 34:
+            continue
+        d = df.iloc[i, :]
+        p = MaronPieParam.load_from_dic(d.to_dict())
+        params.append(p)
+    evaluate(symbol, ver, params, dirpath)
+        
 
 def loop():
     symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
@@ -561,5 +581,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('USDJPY', 3)
+    optimize2('US100', 4)
     #test()

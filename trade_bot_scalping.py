@@ -115,7 +115,7 @@ class TradeBot:
         try:
             with open(path, 'rb') as f:
                 trade_manager = pickle.load(f)
-            print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(self.trade_manager.positions))
+            print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(trade_manager.positions))
         except Exception as e:
             print(e)
             trade_manager = TradeManager(self.symbol, self.timeframe)
@@ -183,7 +183,8 @@ class TradeBot:
             self.save_trade_manager()
         
     def update_sl(self):
-        for ticket, position in self.trade_manager.open_positions().items():
+        positions = self.trade_manager.open_positions()
+        for ticket, position in positions.items():
             if (self.param.sl_loose is not None) and (position.sl_updated is False):
                 if position.order_signal == Signal.LONG:
                     sl = position.entry_price - self.param.sl
@@ -243,7 +244,8 @@ class TradeBot:
 
     def close_all_positions(self):
         removed_tickets = []
-        for ticket, position in self.trade_manager.open_positions().items():
+        positions = self.trade_manager.open_positions():
+        for ticket, position in positions.items():
             ret, _ = self.mt5.close_by_position_info(position)
             if ret:
                 removed_tickets.append(position.ticket)
@@ -252,7 +254,7 @@ class TradeBot:
                 self.debug_print('<Closed> Fail', self.symbol, position.desc())           
         self.trade_manager.remove_positions(removed_tickets)
 
-def load_params(strategy, symbol, volume, position_max):
+def load_params(strategy, symbol, ver, volume, position_max):
     def array_str2int(s):
         i = s.find('[')
         j = s.find(']')
@@ -260,7 +262,7 @@ def load_params(strategy, symbol, volume, position_max):
         return float(v)
     
     print( os.getcwd())
-    path = f'./{strategy}/{strategy}_best_trade_params.xlsx'
+    path = f'./{strategy}/v{ver}/{strategy}_v{ver}_best_trade_params.xlsx'
     df = pd.read_excel(path)
     df = df[df['symbol'] == symbol]
     params = []
@@ -268,13 +270,15 @@ def load_params(strategy, symbol, volume, position_max):
         row = df.iloc[i].to_dict()
         if strategy == 'Maron':
             param = MaronParam.load_from_dic(row)
+            param.volume = volume
+            param.position_max = position_max
             params.append(param)      
         else:
             raise Exception('No definition ' + strategy)
     return params
 
-def create_bot(strategy, symbol, lot):
-    params = load_params(strategy, symbol, lot, 10)
+def create_bot(strategy, ver, symbol, lot):
+    params = load_params(strategy, symbol, ver, lot, 10)
     print(symbol, 'parameter num', len(params))
     param = params[0]
     param.volume = lot
@@ -298,10 +302,10 @@ def is_close_time():
             return True
     return False
          
-def execute(strategy, items):
+def execute(strategy, items, ver):
     bots = {}
     for i, (symbol, lot) in enumerate(items):
-        bot = create_bot(strategy, symbol, lot)
+        bot = create_bot(strategy, ver, symbol, lot)
         if i == 0:
             Mt5Trade.connect()
         bot.run()
@@ -331,5 +335,5 @@ if __name__ == '__main__':
                 ['JP225', 10], 
                 ['US100', 1],
             ]
-    execute(strategy, items)
+    execute(strategy, items, 3)
     #test()

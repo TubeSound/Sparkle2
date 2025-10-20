@@ -114,7 +114,7 @@ class TradeBot:
         try:
             with open(path, 'rb') as f:
                 trade_manager = pickle.load(f)
-            print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(self.trade_manager.positions))
+            print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(trade_manager.positions))
         except:
             trade_manager = TradeManager(self.symbol, self.timeframe)
         return trade_manager
@@ -163,7 +163,7 @@ class TradeBot:
                 return
             else:
                 self.last_time = jst[-1]            
-        self.update_sl()
+        #self.update_sl()
         t1 = datetime.now()
         self.act.calc(df)
         t2 = datetime.now()
@@ -183,15 +183,25 @@ class TradeBot:
     def doten(self, signal):
         if signal == 0:
             return
-        for ticket, position in self.trade_manager.positions.items():
+        print('doten', signal, self.symbol)
+        positions = self.trade_manager.positions.copy()
+        for ticket, position in positions.items():
             if signal == 1:
                 # down -> up
+                
                 if position.order_signal == Signal.SHORT:
                     self.close_position(position)
+                    print('close: down->up ', self.symbol, position.ticket)
             elif signal == -1:
                 # up ->down
+                
                 if position.order_signal == Signal.LONG:
                     self.close_position(position)
+                    print('trend: up->down', self.symbol, position.ticket)
+        
+    def remove_closed_positions(self):
+        positions = self.mt5.get_positions(self.symbol)
+        self.trade_manager.remove_position_auto(positions)    
         
     def close_position(self, position: PositionInfo):
         ret, _ = self.mt5.close_by_position_info(position)
@@ -203,11 +213,13 @@ class TradeBot:
         return ret
     
     def close_all_positions(self):
-        for ticket, position in self.trade_manager.positions.items():
+        positions = self.trade_manager.positions.copy()
+        for ticket, position in positions.items():
             self.close_position(position)
                 
     def update_sl(self):
-        for ticket, position in self.trade_manager.open_positions().items():
+        positions = self.trade_manager.positions.copy()
+        for ticket, position in positions.items():
             if (self.param.sl_loose is not None) and (position.sl_updated is False):
                 if position.order_signal == Signal.LONG:
                     sl = position.entry_price - self.param.sl
@@ -215,9 +227,13 @@ class TradeBot:
                     sl = position.entry_price + self.param.sl
                 else:
                     continue
-                self.mt5.modify_sl(self.symbol, position.ticket, sl)
-                position.sl_updated = True        
-        
+                ret = self.mt5.modify_sl(self.symbol, position.ticket, sl)
+                if ret:
+                    position.sl_updated = True        
+                else:
+                    print('error update sl', self.symbol, 'ticket:', ticket, 'stoploss price:', sl)
+                    #self.close_position(position)
+                    
     def mt5_position_num(self):
         positions = self.mt5.get_positions(self.symbol)
         count = 0
@@ -228,18 +244,15 @@ class TradeBot:
         
     def entry(self, signal, time):
         volume = self.param.volume
-        if self.param.sl_loose is None:
-            sl = self.param.sl
-        else:
-            sl = self.param.sl * self.param.sl_loose
-        tp = self.param.tp                     
+        sl = self.param.sl
+        #tp = self.param.tp                     
         position_max = int(self.param.position_max)
         num =  self.mt5_position_num()
         if num >= position_max:
             self.debug_print('<Entry> Request Canceled ', self.symbol, time,  'Position num', num)
             return
         try:
-            ret, position_info = self.mt5.entry(self.symbol, signal, time, volume, stoploss=sl, takeprofit=tp)
+            ret, position_info = self.mt5.entry(self.symbol, signal, time, volume, stoploss=sl) #, takeprofit=tp)
             if ret:
                 self.trade_manager.add_position(position_info)
                 self.debug_print('<Entry> signal', position_info.order_signal, position_info.symbol, position_info.entry_time)
@@ -251,7 +264,7 @@ class TradeBot:
             
 
 
-def load_params(strategy, symbol, volume, position_max):
+def load_params(strategy, symbol, ver, volume, position_max):
     def array_str2int(s):
         i = s.find('[')
         j = s.find(']')
@@ -259,7 +272,7 @@ def load_params(strategy, symbol, volume, position_max):
         return float(v)
     
     print( os.getcwd())
-    path = f'./{strategy}/{strategy}_best_trade_params.xlsx'
+    path = f'./{strategy}/v{ver}/{strategy}_v{ver}_best_trade_params.xlsx'
     df = pd.read_excel(path)
     df = df[df['symbol'] == symbol]
     params = []
@@ -267,13 +280,15 @@ def load_params(strategy, symbol, volume, position_max):
         row = df.iloc[i].to_dict()
         if strategy == 'MaronPie':
             param = MaronPieParam.load_from_dic(row)
+            param.volume = volume
+            param.position_max = position_max
             params.append(param)      
         else:
             raise Exception('No definition ' + strategy)
     return params
 
-def create_bot(strategy, symbol, lot):
-    params = load_params(strategy, symbol, lot, 10)
+def create_bot(strategy, symbol, ver, lot):
+    params = load_params(strategy, symbol, ver, lot, 10)
     print(symbol, 'parameter num', len(params))
     param = params[0]
     param.volume = lot
@@ -297,10 +312,10 @@ def is_close_time():
             return True
     return False
          
-def execute(strategy, items):
+def execute(strategy, ver, items):
     bots = {}
     for i, (symbol, lot) in enumerate(items):
-        bot = create_bot(strategy, symbol, lot)
+        bot = create_bot(strategy, symbol, ver, lot)
         if i == 0:
             Mt5Trade.connect()
         bot.run()
@@ -326,7 +341,8 @@ if __name__ == '__main__':
                 ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
                 ['JP225', 10], 
-                ['US100', 1],
+                #['US30', 0.1],
+                ['US100', 0.1]
             ]
-    execute(strategy, items)
+    execute(strategy, 4, items)
     #test()

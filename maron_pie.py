@@ -17,6 +17,7 @@ class MaronPieParam:
     heikin_minutes = 60
     heikin_threshold = 0.04
     sl = 0.5
+    tp = None
     sl_loose = None
     position_max = 20
     volume = 0.01
@@ -177,9 +178,9 @@ class MaronPie:
         current = 0
         for i in range(1, n):
             if current == 1 and self.reversal[i] == -1:
-                exits[i] = Signal.CLOSE
+                exits[i] = -1
             elif current == -1 and self.reversal[i] == 1:
-                exits[i] = Signal.CLOSE
+                exits[i] = 1
             if self.no_trend[i] == 1:
                 continue
             if self.trend[i] == -1:
