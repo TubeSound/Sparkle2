@@ -6,33 +6,24 @@ from technical import calc_sma, calc_ema, calc_atr, is_nans, trend_heikin, super
 from common import Columns, Indicators
 from trade_manager import TradeManager, Signal, PositionInfo
 
-class MaronPieParam:
-    ma_term = 14
-    ma_method = 'ema'
-    atr_term = 6
-    atr_shift_multiply = 0.6
-    supertrend_atr_term = 10
-    supertrend_minutes = 15
-    supertrend_multiply = 3.5
-    heikin_minutes = 60
-    heikin_threshold = 0.04
+class MontblancParam:
+    atr_term = 10
+    trend_minutes = 5
+    trend_multiply = 2.0
+    trend_micro_minutes = 1
+    trend_micro_multiply = 2.0 
     sl = 0.5
-    tp = None
     sl_loose = None
     position_max = 20
     volume = 0.01
 
     def to_dict(self):
         dic = {
-                'ma_term': self.ma_term,
-                'ma_method': self.ma_method,
                 'atr_term': self.atr_term,
-                'atr_shift_multiply': self.atr_shift_multiply,
-                'supertrend_atr_term': self.supertrend_atr_term, 
-                'supertrend_minutes': self.supertrend_minutes,
-                'supertrend_multiply':self.supertrend_multiply,
-                'heikin_minutes': self.heikin_minutes,
-                'heikin_threshold': self.heikin_threshold,
+                'trend_minutes': self.trend_minutes,
+                'trend_multiply': self.trend_multiply,
+                'trend_micro_minutes': self.trend_micro_minutes,
+                'trend_micro_multiply': self.trend_micro_multiply,
                 'sl': self.sl,
                 'sl_loose': self.sl_loose,
                 'position_max': self.position_max,
@@ -42,17 +33,12 @@ class MaronPieParam:
     
     @staticmethod
     def load_from_dic(dic: dict):
-        param = MaronPieParam()
-        param.ma_term = int(dic['ma_term']) 
-        param.ma_method = dic['ma_method']          
+        param = MontblancParam()   
         param.atr_term = int(dic['atr_term'])
-        param.atr_shift_multiply = float(dic['atr_shift_multiply'])
-        param.supertrend_atr_term = int(dic['supertrend_atr_term'])
-        param.supertrend_minutes = int(dic['supertrend_minutes'])
-        param.supertrend_multiply = float(dic['supertrend_multiply'])
-        param.heikin_minutes = int(dic['heikin_minutes'])
-        param.heikin_threshold = float(dic['heikin_threshold'])
-        param.heikin_minutes = int(dic['heikin_minutes'])
+        param.trend_minutes = int(dic['trend_minutes'])
+        param.trend_multiply = float(dic['trend_multiply'])
+        param.trend_micro_minutes = int(dic['trend_micro_minutes'])
+        param.trend_micro_multiply = float(dic['trend_micro_multiply'])
         param.sl = float(dic['sl'])
         if dic['sl_loose'] == None:
             param.sl_loose = None
@@ -62,8 +48,8 @@ class MaronPieParam:
         param.volume = float(dic['volume'])
         return param    
         
-class MaronPie:
-    def __init__(self, symbol, param: MaronPieParam):
+class Montblanc:
+    def __init__(self, symbol, param: MontblancParam):
         self.symbol = symbol
         self.param = param
         
@@ -154,43 +140,32 @@ class MaronPie:
         self.hi = df[Columns.HIGH].to_numpy()
         self.lo = df[Columns.LOW].to_numpy()
         self.cl = df[Columns.CLOSE].to_numpy()
-        if self.param.ma_method.lower() == 'sma':
-            self.ma = calc_sma(self.cl, self.param.ma_term)
-        else:
-            self.ma = calc_ema(self.cl, self.param.ma_term)
-        self.atr = calc_atr(self.hi, self.lo, self.cl, self.param.atr_term, how=self.param.ma_method)
-        self.ma_upper = self.ma + self.atr * self.param.atr_shift_multiply
-        self.ma_lower = self.ma - self.atr * self.param.atr_shift_multiply
-        
-        trend, reversal, upper_line, lower_line = super_trend(df, self.param.supertrend_minutes, self.param.supertrend_atr_term, self.param.supertrend_multiply)
-        self.supertrend_upper = upper_line
-        self.supertrend_lower = lower_line
-        _, no_trend = trend_heikin(df, self.param.heikin_minutes, self.param.heikin_threshold)
+        self.atr = calc_atr(self.hi, self.lo, self.cl, self.param.atr_term)
+        trend, reversal, upper_line, lower_line = super_trend(df, self.param.trend_minutes, self.param.atr_term, self.param.trend_multiply)
+        trend_micro, reversal_micro, ul, ll = super_trend(df, self.param.trend_micro_minutes, self.param.atr_term, self.param.trend_micro_multiply)
+        self.upper_line = upper_line
+        self.lower_line = lower_line
+        self.micro_upper_line = ul
+        self.micro_lower_line = ll
         self.trend = trend
-        self.no_trend = no_trend
         self.reversal = reversal
+        self.trend_micro = trend_micro
+        self.reversal_micro = reversal_micro
         self.entries, self.exits = self.detect_signals()
     
     def detect_signals(self):
         n = len(self.cl)
         entries = np.full(n, 0)
         exits = np.full(n, 0)
-        current = 0
         for i in range(1, n):
-            if current == 1 and self.reversal[i] == -1:
-                exits[i] = -1
-            elif current == -1 and self.reversal[i] == 1:
-                exits[i] = 1
-            if self.no_trend[i] == 1:
-                continue
-            if self.trend[i] == -1:
-                if self.cl[i - 1] <= self.ma_upper[i - 1] and self.cl[i] > self.ma_upper[i]:
-                    entries[i] = Signal.SHORT
-                    current = -1                        
-            elif self.trend[i] == 1:
-                if self.cl[i - 1] >= self.ma_lower[i - 1] and self.cl[i] < self.ma_lower[i]:
-                    entries[i] = Signal.LONG
-                    current = 1   
+            # trendが変化したときにクローズ
+            if self.reversal[i] != 0:
+                exits[i] = self.reversal[i]
+            # microトレンドが変化したところでエントリー
+            if self.trend[i] == 1 and self.reversal_micro[i] == 1:
+                entries[i] = Signal.LONG
+            elif self.trend[i] == -1 and self.reversal_micro[i] == -1:
+                entries[i] = Signal.SHORT
         return entries, exits
      
     def simulate_doten(self, tbegin, tend):
@@ -286,5 +261,6 @@ class MaronPie:
         self.profits = profits
         df_profits = pd.DataFrame(profits)
         return manager.summary(), df_profits
+
 
 

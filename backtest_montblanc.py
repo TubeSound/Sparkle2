@@ -24,7 +24,7 @@ from common import Columns, Indicators
 from html_writer import HtmlWriter
 
 from trade_bot import load_params
-from maron_pie import MaronPie, MaronPieParam
+from montblanc import Montblanc, MontblancParam
 
 
 def makeFig(rows, cols, size):
@@ -203,17 +203,14 @@ def load_all_data(symbol):
             pickle.dump(dic, f)
     return dic
         
-def generate_param(symbol:str, param: MaronPieParam):
+def generate_param(symbol:str, param: MontblancParam):
     param.ma_term = rand_step(10, 30, 5)
     param.ma_method = 'ema'
     param.atr_term = rand_step(5, 30, 5)
-    param.atr_shift_multiply = rand_step(1.0, 5.0, 0.2)
-    param.supertrend_atr_term = rand_step(5, 40, 5)
-    param.supertrend_minutes = rand_step(1, 10, 1)
-    param.supertrend_multiply = rand_step(1.0, 5.0, 0.2)
-    param.heikin_threshold = rand_step(0.01, 0.2, 0.01)
-    param.heikin_minutes = rand_select([60, 90, 120])
-   
+    param.trend_minutes = rand_step(5, 30, 5)
+    param.trend_multiply = rand_step(1.0, 4.0, 0.2)
+    param.trend_micro_minutes = rand_step(1, 5, 1)
+    param.trend_micro_multiply = rand_step(1.0, 4.0, 0.2)    
     if symbol in ['JP225', 'US30']:
         param.sl = rand_step(40, 100, 20)
     elif symbol in ['US100', 'GER40']:
@@ -240,9 +237,9 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     result = []
     #for short_term, long_term, th, sl, tp in itertools.product(short_terms, long_terms, ths, sls, tps):
     for _ in range(repeat):                   
-        param = MaronPieParam()
+        param = MontblancParam()
         generate_param(symbol, param)
-        maron = MaronPie(symbol, param)
+        maron = Montblanc(symbol, param)
         rows = []
         columns = []
         t = tbegin
@@ -277,7 +274,7 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
         d = dict(**d0, **d1)
         dic = dict(**d, **metric)
         result.append(dic)
-        print('MaronPie Optimize Phase1', i, symbol, 'profit:', metric['profit'])
+        print('Montblanc Optimize Phase1', i, symbol, 'profit:', metric['profit'])
         i += 1
         
     keys = list(result[0].keys())
@@ -306,7 +303,7 @@ def evaluate(symbol, ver, params, dir_path):
     i = 0
     result = []
     for param in params:
-        maron = MaronPie(symbol, param)
+        maron = Montblanc(symbol, param)
         rows = []
         t = tbegin
         length = 2 * 24 * 60
@@ -332,10 +329,10 @@ def evaluate(symbol, ver, params, dir_path):
                 (r, columns), _ = maron.simulate_doten(t0, t1)
                 if len(r) > 0:
                     rows += r
-                    #print(symbol, t0, t1, 'MaronPie Optimize 2nd done')
+                    #print(symbol, t0, t1, 'Montblanc Optimize 2nd done')
                 else:
                     pass
-                    #print(symbol, t0, t1, 'MaronPie Optimize 2nd done ... No Trade')
+                    #print(symbol, t0, t1, 'Montblanc Optimize 2nd done ... No Trade')
             t += timedelta(days=1)
             
         if len(rows) == 0:
@@ -347,7 +344,7 @@ def evaluate(symbol, ver, params, dir_path):
         d = dict(**d0, **d1)
         dic = dict(**d, **metric)
         result.append(dic)
-        print('MaronPie Phase2', i, symbol, 'profit:', metric['profit'])
+        print('Montblanc Phase2', i, symbol, 'profit:', metric['profit'])
         if metric['profit'] > 0:
             save_profit_graph(symbol, f"{i}_profit", df_metric, dir_path)
         i += 1
@@ -400,20 +397,18 @@ def plot_signal_marker(ax, timestamp, signal, values):
             continue
         ax.scatter(timestamp[i], values[i], marker=marker, color=color, alpha=alpha, s=100)
     
-def plot_chart(title, timestamp, maron: MaronPie, param: MaronPieParam, graph_height):
-    fig, axes = gridFig([7, 1, 1, 1], (18, 12))
+def plot_chart(title, timestamp, maron: Montblanc, param: MontblancParam, graph_height):
+    fig, axes = gridFig([7, 1, 7, 1], (18, 12))
     timestamp = maron.timestamp
-    colors = ['gray', 'red', 'green' , 'orange', 'blue']
-    labels = ['Close',  f'MA({param.ma_term}) + ATR Upper', f'({param.ma_term}) - ATR Lower', 'supertrend(+)', 'supertrend(-)']
-    plot_prices(axes[0], timestamp, [maron.cl, maron.ma_upper, maron.ma_lower, maron.supertrend_upper, maron.supertrend_lower], colors, labels, graph_height)
-   
+    colors = ['gray', 'red', 'green']
+    labels = ['Close',  'supertrend(+)', 'supertrend(-)']
+    plot_prices(axes[0], timestamp, [maron.cl, maron.upper_line, maron.lower_line], colors, labels, graph_height)
     axes[1].plot(timestamp, maron.trend, color='blue', label='Trend')
-    plot_signal_marker(axes[0], timestamp, maron.entries, maron.cl)
-    plot_signal_marker(axes[0], timestamp, maron.exits, maron.cl)
-    
-    axes[2].plot(timestamp, maron.reversal, color='blue', label='Reversal')
-    
-    axes[3].plot(timestamp, maron.no_trend, color='red', label='No Trend')
+    plot_prices(axes[2], timestamp, [maron.cl, maron.micro_upper_line, maron.micro_lower_line], colors, labels, graph_height) 
+    axes[2].plot(timestamp, maron.trend_micro, color='red', label='TrendMicrio')
+    plot_signal_marker(axes[2], timestamp, maron.entries, maron.cl)
+    plot_signal_marker(axes[2], timestamp, maron.exits, maron.cl)
+    axes[3].plot(timestamp, maron.reversal_micro, color='blue', label='ReversalMicro')
     
     t0 = timestamp[0]
     t1 = timestamp[-1]
@@ -479,9 +474,9 @@ def main(symbol, tp, sl, graph_height):
             fig, df = backtest(f'{name}', file,  tp, sl, graph_height)
             dfs.append(df)
             writer.add_fig(fig)
-        dir_path = f'./MaronPie/Scalping/{symbol}'
+        dir_path = f'./Montblanc/Scalping/{symbol}'
         os.makedirs(dir_path, exist_ok=True)
-        path = f'./MaronPie/Scalping/{symbol}/{symbol}_{year}_{mstr}.html'
+        path = f'./Montblanc/Scalping/{symbol}/{symbol}_{year}_{mstr}.html'
         writer.write(path)
         
     df = pd.concat(dfs)
@@ -489,45 +484,29 @@ def main(symbol, tp, sl, graph_height):
 
         
 def optimize(symbol, ver):
-    print('Start', symbol)
+    print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
-    if ver == 5 and symbol == 'JP225':
+    if ver >= 1 and symbol == 'JP225':
         tbegin = datetime(2025, 9, 1).astimezone(JST)
         tend = datetime(2025, 10, 24).astimezone(JST)   
-    elif ver >= 4:
+    else:
         tbegin = datetime(2025, 2, 3).astimezone(JST)
         tend = datetime(2025, 4, 26).astimezone(JST)
-    else:
-        tbegin = datetime(2024, 5, 16).astimezone(JST)
-        tend = datetime(2024, 9, 30).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=4000)
+    df = optimizer(symbol, dic, tbegin, tend, repeat=2000)
     df = df.head(50)
     print(df)
-    dirpath = f'./MaronPie/v{ver}/Optimize2/{symbol}'
+    dirpath = f'./Montblanc/v{ver}/Optimize/{symbol}'
     os.makedirs(dirpath, exist_ok=True)
     df.to_excel(os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx"))
-    
-    
+   
     params = []
     for i in range(len(df)):
         d = df.iloc[i, :]
-        p = MaronPieParam.load_from_dic(d.to_dict())
+        p = MontblancParam.load_from_dic(d.to_dict())
         params.append(p)
     evaluate(symbol, ver, params, dirpath)
     
-
-def optimize2(symbol, ver):
-    dirpath = f'./MaronPie/v{ver}/Optimize2/{symbol}'
-    df = pd.read_excel(os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx"), sheet_name='Sheet1')
-    params = []
-    for i in range(len(df)):
-        if i == 34:
-            continue
-        d = df.iloc[i, :]
-        p = MaronPieParam.load_from_dic(d.to_dict())
-        params.append(p)
-    evaluate(symbol, ver, params, dirpath)
-        
+    
 
 def loop():
     symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
@@ -551,35 +530,24 @@ def test():
     symbol = 'JP225'
     dic = load_all_data(symbol)
     df0 = pd.DataFrame(dic)
-    t0 = datetime(2025, 10, 3, 8).astimezone(JST)
-    t1 = datetime(2025, 10, 3, 18).astimezone(JST)
-    df1 = df0[(df0['jst'] >= t0) & (df0['jst'] <= t1)]
+    t0 = datetime(2025, 10, 9).astimezone(JST)
+    t1 = datetime(2025, 10, 10, 18).astimezone(JST)
+    df1 = df0[(df0['jst'] >= t0)]
     index = df1.index[-1]
-    length = 60 * 24 * 2
+    length = 60 * 24
     df = df0.iloc[index - length: index + 1, :]
     jst = df['jst'].to_list()
-    param = MaronPieParam()
-    param.ma_term = 14
-    param.ma_method = "sma"
-    param.atr_term = 24
-    param.atr_shift_multiply= 0.2
-    param.supertrend_atr_term = 30
-    param.supertrend_minutes = 15
-    param.supertrend_multiply = 2.0
-    param.heikin_minutes = 60
-    param.heikin_threshold  = 0.03
-    param.sl = 10
-
-    maron = MaronPie(symbol, param)
+    param = MontblancParam()
+    maron = Montblanc(symbol, param)
     maron.calc(df)
-    fig = plot_chart(symbol, jst, maron, param, 2000)
+    fig = plot_chart(symbol, jst, maron, param, 1500)
     os.makedirs('./debug', exist_ok=True)
-    fig.savefig('./debug/jp225.png')
+    fig.savefig('./debug/montblanc_nk225.png')
     
-    (r, columns),df_profit = maron.simulate_doten(t0, t1)
+    (r, columns), _ = maron.simulate_doten(t0, t1)
     df_metric = pd.DataFrame(data=r, columns=columns)
-    df_metric.to_csv('./debug/trade_jp225.csv', index=False)  
-    df_profit.to_csv('./debug/jp225_profit.csv', index=False)
+    df_metric.to_csv('./debug/montblanc_nk225_trade.csv', index=False)  
+    #df_profit.to_csv('./debug/montblanc_jp225_profit.csv', index=False)
     
     
 def test2():
@@ -590,5 +558,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('JP225', 5)
+    optimize('US100', 2)
     #test()
