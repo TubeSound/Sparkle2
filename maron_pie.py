@@ -19,7 +19,7 @@ class MaronPieParam:
     sl = 0.5
     tp = None
     sl_loose = None
-    position_max = 20
+    position_max = 5
     volume = 0.01
 
     def to_dict(self):
@@ -162,7 +162,7 @@ class MaronPie:
         self.ma_upper = self.ma + self.atr * self.param.atr_shift_multiply
         self.ma_lower = self.ma - self.atr * self.param.atr_shift_multiply
         
-        trend, reversal, upper_line, lower_line = super_trend(df, self.param.supertrend_minutes, self.param.supertrend_atr_term, self.param.supertrend_multiply)
+        trend, reversal, upper_line, lower_line, counts = super_trend(df, self.param.supertrend_minutes, self.param.supertrend_atr_term, self.param.supertrend_multiply)
         self.supertrend_upper = upper_line
         self.supertrend_lower = lower_line
         _, no_trend = trend_heikin(df, self.param.heikin_minutes, self.param.heikin_threshold)
@@ -247,7 +247,7 @@ class MaronPie:
                 # loss cut
                 cleanup(i, self.hi[i], self.lo[i])
             entry = self.entries[i]    
-            if entry == 0:
+            if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
                 continue
             elif entry == Signal.LONG:
                 typ =  mt5api.ORDER_TYPE_BUY_STOP_LIMIT

@@ -14,7 +14,7 @@ class MontblancParam:
     trend_micro_multiply = 2.0 
     sl = 0.5
     sl_loose = None
-    position_max = 20
+    position_max = 5
     volume = 0.01
 
     def to_dict(self):
@@ -141,8 +141,8 @@ class Montblanc:
         self.lo = df[Columns.LOW].to_numpy()
         self.cl = df[Columns.CLOSE].to_numpy()
         self.atr = calc_atr(self.hi, self.lo, self.cl, self.param.atr_term)
-        trend, reversal, upper_line, lower_line = super_trend(df, self.param.trend_minutes, self.param.atr_term, self.param.trend_multiply)
-        trend_micro, reversal_micro, ul, ll = super_trend(df, self.param.trend_micro_minutes, self.param.atr_term, self.param.trend_micro_multiply)
+        trend, reversal, upper_line, lower_line, counts = super_trend(df, self.param.trend_minutes, self.param.atr_term, self.param.trend_multiply)
+        trend_micro, reversal_micro, ul, ll, counts_micro = super_trend(df, self.param.trend_micro_minutes, self.param.atr_term, self.param.trend_micro_multiply)
         self.upper_line = upper_line
         self.lower_line = lower_line
         self.micro_upper_line = ul
@@ -222,7 +222,7 @@ class Montblanc:
                 # loss cut
                 cleanup(i, self.hi[i], self.lo[i])
             entry = self.entries[i]    
-            if entry == 0:
+            if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
                 continue
             elif entry == Signal.LONG:
                 typ =  mt5api.ORDER_TYPE_BUY_STOP_LIMIT

@@ -208,9 +208,9 @@ def generate_param(symbol:str, param: MontblancParam):
     param.ma_method = 'ema'
     param.atr_term = rand_step(5, 30, 5)
     param.trend_minutes = rand_step(5, 30, 5)
-    param.trend_multiply = rand_step(1.0, 4.0, 0.2)
-    param.trend_micro_minutes = rand_step(1, 5, 1)
-    param.trend_micro_multiply = rand_step(1.0, 4.0, 0.2)    
+    param.trend_multiply = rand_step(2.0, 4.0, 0.2)
+    param.trend_micro_minutes = 1
+    param.trend_micro_multiply = rand_step(1.0, 3.0, 0.1)    
     if symbol in ['JP225', 'US30']:
         param.sl = rand_step(40, 100, 20)
     elif symbol in ['US100', 'GER40']:
@@ -492,7 +492,7 @@ def optimize(symbol, ver):
     else:
         tbegin = datetime(2025, 2, 3).astimezone(JST)
         tend = datetime(2025, 4, 26).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=2000)
+    df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
     df = df.head(50)
     print(df)
     dirpath = f'./Montblanc/v{ver}/Optimize/{symbol}'
@@ -558,5 +558,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('US100', 2)
+    optimize('XAUUSD', 2)
     #test()

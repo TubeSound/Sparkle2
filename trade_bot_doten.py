@@ -18,6 +18,7 @@ from utils import Utils
 from common import Indicators
 
 from maron_pie import MaronPie, MaronPieParam
+from montblanc import Montblanc, MontblancParam
 
 
 JST = tz.gettz('Asia/Tokyo')
@@ -75,6 +76,8 @@ class TradeBot:
         self.param = param
         if strategy == 'MaronPie':
             self.act = MaronPie(symbol, param)
+        elif strategy.lower() == 'montblanc':
+            self.act = Montblanc(symbol, param)
         mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
         self.trade_manager = self.load_trade_manager()
@@ -283,6 +286,11 @@ def load_params(strategy, symbol, ver, volume, position_max):
             param.volume = volume
             param.position_max = position_max
             params.append(param)      
+        elif strategy == 'Montblanc':
+            param = MontblancParam.load_from_dic(row)
+            param.volume = volume
+            param.position_max = position_max
+            params.append(param)  
         else:
             raise Exception('No definition ' + strategy)
     return params
@@ -303,14 +311,30 @@ def is_trade_time():
     return not (now >= begin and now < end)
          
 def is_close_time():
-    hours = [0, 7, 16]
+    hours = [[23, 58], [6, 50], [16, 30]]
     now = datetime.now()
-    for hour in hours:
-        begin = datetime(now.year, now.month, now.day, hour=hour, minute=0)
-        end = datetime(now.year, now.month, now.day, hour=hour, minute=2)
+    for hour, minute in hours:        
+        begin = datetime(now.year, now.month, now.day, hour=hour, minute=minute)
+        end = begin + timedelta(minutes=1)
         if (now >= begin and now < end):
             return True
     return False
+         
+def is_trade_time(symbol):
+    if symbol == 'USDJPY':
+        return True    
+    # 休憩時間　# 07:00 ～ 08:15, 16:30 ～ 21:15はトレードしない
+    rest = [
+                [[7, 0], [8, 15]], 
+                [[16, 30], [21, 15]]
+            ]
+    now = datetime.now()
+    for [hour0, min0], [hour1, min1] in rest:
+        begin = datetime(now.year, now.month, now.day, hour=hour0, minute=min0)
+        end = datetime(now.year, now.month, now.day, hour=hour1, minute=min1)
+        if (now >= begin and now < end):
+            return False
+    return True
          
 def execute(strategy, ver, items):
     bots = {}
@@ -323,26 +347,42 @@ def execute(strategy, ver, items):
         
     while True:
         for i, (symbol, lot) in enumerate(items):
-            if is_close_time():
-                bots[symbol].close_all_positions()
-            else:   
-                scheduler.enter(5, 1 + 1, bots[symbol].update)
-                scheduler.run()
+            if is_trade_time(symbol):
+                if is_close_time():
+                    bots[symbol].close_all_positions()
+                else:   
+                    scheduler.enter(5, 1 + 1, bots[symbol].update)
+                    scheduler.run()
             
 def test():
     
     params = load_params('NSDQ', 0.01, 20)
     print(params)
 
-if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))    
+def MarinPie():
     strategy = 'MaronPie'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.01],
+                ['XAUUSD', 0.02],
                 ['USDJPY', 0.1],
                 ['JP225', 10], 
-                #['US30', 0.1],
+                ['US30', 0.1],
                 ['US100', 0.1]
             ]
-    execute(strategy, 4, items)
+    execute(strategy, 4, items)    
+
+
+def montblanc():
+    strategy = 'Montblanc'
+    items = [    # [symbol, volume, sl_loose]
+                #['XAUUSD', 0.02],
+                #['USDJPY', 0.1],
+                ['JP225', 10], 
+                #['US30', 0.1],
+                #['US100', 0.1]
+            ]
+    execute(strategy, 2, items)    
+    
+if __name__ == '__main__':
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))    
+    montblanc()
     #test()

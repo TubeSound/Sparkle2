@@ -206,16 +206,16 @@ def load_all_data(symbol):
 def generate_param(symbol:str, param: MaronPieParam):
     param.ma_term = rand_step(10, 30, 5)
     param.ma_method = 'ema'
-    param.atr_term = rand_step(5, 30, 5)
-    param.atr_shift_multiply = rand_step(1.0, 5.0, 0.2)
+    param.atr_term = rand_step(10, 30, 5)
+    param.atr_shift_multiply = rand_step(2.0, 5.0, 0.2)
     param.supertrend_atr_term = rand_step(5, 40, 5)
-    param.supertrend_minutes = rand_step(1, 10, 1)
-    param.supertrend_multiply = rand_step(1.0, 5.0, 0.2)
+    param.supertrend_minutes = rand_step(5, 20, 5)
+    param.supertrend_multiply = rand_step(2.0, 5.0, 0.5)
     param.heikin_threshold = rand_step(0.01, 0.2, 0.01)
     param.heikin_minutes = rand_select([60, 90, 120])
    
     if symbol in ['JP225', 'US30']:
-        param.sl = rand_step(40, 100, 20)
+        param.sl = rand_step(60, 200, 20)
     elif symbol in ['US100', 'GER40']:
         param.sl = rand_step(30, 80, 10)
     elif symbol in ['SP']:
@@ -500,7 +500,7 @@ def optimize(symbol, ver):
     else:
         tbegin = datetime(2024, 5, 16).astimezone(JST)
         tend = datetime(2024, 9, 30).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=4000)
+    df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
     df = df.head(50)
     print(df)
     dirpath = f'./MaronPie/v{ver}/Optimize2/{symbol}'
@@ -590,5 +590,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('JP225', 5)
+    optimize('XAUUSD', 5)
     #test()

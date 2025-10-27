@@ -694,6 +694,8 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
     current = 0
     trend1 = np.full(n1, 0)
     trend_reversal = np.full(n1, 0)
+    counts = np.full(n1, 0)
+    count = 0
     for i in range(n1):
         if np.isnan(atr[i]):
             continue
@@ -716,18 +718,24 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
         if current == 1:
             new_bottom = hi[i] - atr[i] * band_multiply
             bottom_line[i] = max([new_bottom, bottom_line[i - 1]])
+            if new_bottom > bottom_line[i - 1]:
+                count += 1
         elif current == -1:
             new_top = lo[i] + atr[i] * band_multiply
             top_line[i] = min([new_top, top_line[i - 1]])
-
+            if new_top < top_line[i - 1]:
+                count -= 1
+        counts[i] = count
+        
     if minutes == 1:
-        return trend1, trend_reversal, top_line, bottom_line
+        return trend1, trend_reversal, top_line, bottom_line, counts
 
     n0 = len(jst0)
     trend0 = np.full(n0, np.nan)
     top_line0 = np.full(n0, -1.0)
     bottom_line0 = np.full(n0, -1.0)
     trend_reversal0 = np.full(n0, 0)
+    counts0 = np.full(n0, 100000)
     for i in range(n1):
         for j in range(n0):
             if jst0[j] == jst1[i]: 
@@ -735,6 +743,7 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
                 top_line0[j] = top_line[i]
                 bottom_line0[j] = bottom_line[i]
                 trend_reversal0[j] = trend_reversal[i]
+                counts0[j] = counts[i] 
                 break
     for i in range(n0):
         if np.isnan(trend0[i]):
@@ -749,7 +758,14 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
             top_line0[i] = np.nan
         if bottom_line0[i] < 0:
             bottom_line0[i] = np.nan
-    return trend0, trend_reversal0, top_line0, bottom_line0
+            
+    for i in range(n0):
+        if counts0[i] == 100000:
+            if i == 0:
+                counts0[i] = 0
+            else:
+                counts0[i] = counts0[i - 1]
+    return trend0, trend_reversal0, top_line0, bottom_line0, counts0
     
     
 
