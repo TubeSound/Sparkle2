@@ -204,6 +204,7 @@ def load_all_data(symbol):
     return dic
         
 def generate_param(symbol:str, param: MaronPieParam):
+    param.position_max = rand_select([1, 2, 3, 4, 5, 7, 10])
     param.ma_term = rand_step(10, 30, 5)
     param.ma_method = 'ema'
     param.atr_term = rand_step(10, 30, 5)
@@ -246,7 +247,7 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
         rows = []
         columns = []
         t = tbegin
-        length = 2 * 24 * 60
+        length = 24 * 60
         while t <= tend:
             t0 = t - timedelta(days=10)
             t1 = t + timedelta(days=1)
@@ -491,7 +492,13 @@ def main(symbol, tp, sl, graph_height):
 def optimize(symbol, ver):
     print('Start', symbol)
     dic = load_all_data(symbol)
-    if ver == 5 and symbol == 'JP225':
+    if ver == 7 and symbol == 'JP225':
+        tbegin = datetime(2025, 10, 27).astimezone(JST)
+        tend = datetime(2025, 10, 29).astimezone(JST)      
+    elif ver == 6:
+        tbegin = datetime(2025, 1, 1).astimezone(JST)
+        tend = datetime(2025, 3, 30).astimezone(JST)   
+    elif ver == 5 and symbol == 'JP225':
         tbegin = datetime(2025, 9, 1).astimezone(JST)
         tend = datetime(2025, 10, 24).astimezone(JST)   
     elif ver >= 4:
@@ -590,5 +597,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('XAUUSD', 5)
+    optimize('JP225', 7)
     #test()

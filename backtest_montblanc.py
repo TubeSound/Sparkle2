@@ -202,8 +202,35 @@ def load_all_data(symbol):
         with open(path, mode='wb') as f:
             pickle.dump(dic, f)
     return dic
+
+def load_params(strategy, symbol, ver):
+    def array_str2int(s):
+        i = s.find('[')
+        j = s.find(']')
+        v = s[i + 1: j]
+        return float(v)
+    
+    print( os.getcwd())
+    path = f'./{strategy}/v{ver}/{strategy}_v{ver}_best_trade_params.xlsx'
+    df = pd.read_excel(path)
+    df = df[df['symbol'] == symbol]
+    params = []
+    for i in range(len(df)):
+        row = df.iloc[i].to_dict()
+        if strategy == 'MaronPie':
+            param = MaronPieParam.load_from_dic(row)
+            param.volume = volume
+            param.position_max = position_max
+            params.append(param)      
+        elif strategy == 'Montblanc':
+            param = MontblancParam.load_from_dic(row)
+            params.append(param)  
+        else:
+            raise Exception('No definition ' + strategy)
+    return params
         
 def generate_param(symbol:str, param: MontblancParam):
+    param.position_max = rand_select([1, 2, 3, 4, 5, 7, 10])
     param.ma_term = rand_step(10, 30, 5)
     param.ma_method = 'ema'
     param.atr_term = rand_step(5, 30, 5)
@@ -484,9 +511,16 @@ def main(symbol, tp, sl, graph_height):
 
         
 def optimize(symbol, ver):
+    iver = int(ver)
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
-    if ver >= 1 and symbol == 'JP225':
+    if iver == 4 and symbol == 'JP225':
+        tbegin = datetime(2025, 10, 27).astimezone(JST)
+        tend = datetime(2025, 10, 29).astimezone(JST)         
+    elif iver == 3:
+        tbegin = datetime(2025, 1, 1).astimezone(JST)
+        tend = datetime(2025, 3, 30).astimezone(JST)  
+    if iver >= 1 and symbol == 'JP225':
         tbegin = datetime(2025, 9, 1).astimezone(JST)
         tend = datetime(2025, 10, 24).astimezone(JST)   
     else:
@@ -528,16 +562,18 @@ def loop():
     
 def test():
     symbol = 'JP225'
+    ver = 3
     dic = load_all_data(symbol)
     df0 = pd.DataFrame(dic)
-    t0 = datetime(2025, 10, 9).astimezone(JST)
-    t1 = datetime(2025, 10, 10, 18).astimezone(JST)
+    t0 = datetime(2025, 10, 28).astimezone(JST)
+    t1 = datetime(2025, 10, 30).astimezone(JST)
     df1 = df0[(df0['jst'] >= t0)]
     index = df1.index[-1]
     length = 60 * 24
     df = df0.iloc[index - length: index + 1, :]
     jst = df['jst'].to_list()
-    param = MontblancParam()
+    params = load_params('Montblanc', symbol, ver)
+    param = params[0]
     maron = Montblanc(symbol, param)
     maron.calc(df)
     fig = plot_chart(symbol, jst, maron, param, 1500)
@@ -558,5 +594,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('XAUUSD', 2)
-    #test()
+    #optimize('XAUUSD', 4.1)
+    test()

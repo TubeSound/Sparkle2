@@ -311,6 +311,7 @@ def is_trade_time():
     return not (now >= begin and now < end)
          
 def is_close_time():
+    return False
     hours = [[23, 58], [6, 50], [16, 30]]
     now = datetime.now()
     for hour, minute in hours:        
@@ -374,13 +375,13 @@ def MarinPie():
 def montblanc():
     strategy = 'Montblanc'
     items = [    # [symbol, volume, sl_loose]
-                #['XAUUSD', 0.02],
+                ['XAUUSD', 0.02],
                 #['USDJPY', 0.1],
                 ['JP225', 10], 
                 #['US30', 0.1],
                 #['US100', 0.1]
             ]
-    execute(strategy, 2, items)    
+    execute(strategy, 3, items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
