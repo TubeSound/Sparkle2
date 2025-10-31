@@ -196,10 +196,10 @@ class Mt5Trade:
         if volume is None:
             volume = position.volume        
         tick = mt5api.symbol_info_tick(position.symbol)
-        if self.is_long(typ):
+        if self.is_long(position.type):
             price = tick.bid
             typ = mt5api.ORDER_TYPE_SELL
-        elif self.is_short(typ):
+        elif self.is_short(position.type):
             price = tick.ask
             typ = mt5api.ORDER_TYPE_BUY
         return self.close(typ, position.ticket, price, volume, deviation=deviation)
@@ -268,8 +268,8 @@ class Mt5Trade:
         #print('Set SL', request, result)
         return self.parse_order_result(result, None, None, None)
     
-    def close_all_position(self):
-        positions = self.get_positions()
+    def close_all_position(self, symbol):
+        positions = self.get_positions(symbol)
         for position in positions:
             self.close_position(position, position.volume)
     

@@ -81,6 +81,7 @@ class TradeBot:
         mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
         self.trade_manager = self.load_trade_manager()
+        self.set_trailing_stop()
         
         self.last_time = None
         self.mt5 = mt5
@@ -107,25 +108,37 @@ class TradeBot:
         print('SeverTime GMT+', dt, tz)
         
         
-    def backup_path(self):
-        dir_path = f'./trading/{self.strategy}/tmp/{self.symbol}/{self.timeframe}'
-        path = os.path.join(dir_path, f'{self.strategy}_{self.symbol}_{self.timeframe}_trade_manager.pkl')
-        return path, dir_path
+    def backup_dir(self):
+        dir_path = f'./trading/{self.strategy}/{self.symbol}/{self.timeframe}'
+        os.makedirs(dir_path, exist_ok=True)
+        return dir_path
+    
+    def trade_manager_path(self):
+        return os.path.join(self.backup_dir(), f'{self.strategy}_{self.symbol}_{self.timeframe}_trade_manager.pkl')
         
     def load_trade_manager(self):
-        path, dir_path = self.backup_path()
         try:
-            with open(path, 'rb') as f:
+            with open(self.trade_manager_path(), 'rb') as f:
                 trade_manager = pickle.load(f)
             print(self.symbol, self.timeframe, ' loaded Trade_manager positions num: ', len(trade_manager.positions))
         except:
             trade_manager = TradeManager(self.symbol, self.timeframe)
         return trade_manager
+    
+    def set_trailing_stop(self):
+        self.trade_manager.set_trailing(    
+                                            enabled=False,
+                                            mode = "abs",
+                                            start_trigger=100,
+                                            distance=50,
+                                            step_lock=50,
+                                            min_positions=1,
+                                            neg_grace_bars=0,
+                                            neg_hard_stop=100,
+                                        )
             
     def save_trade_manager(self):
-        path, dir_path = self.backup_path()
-        os.makedirs(dir_path, exist_ok=True)
-        with open(path, 'wb') as f:
+        with open(self.trade_manager_path(), 'wb') as f:
             pickle.dump(self.trade_manager, f)     
             
     def df2dic(self, df):
@@ -166,7 +179,18 @@ class TradeBot:
                 return
             else:
                 self.last_time = jst[-1]            
-        #self.update_sl()
+                
+        cl = df[Columns.CLOSE].to_list()        
+        judge = self.trade_manager.judge_stop(cl[-1])
+        try:
+            df_profit = self.trade_manager.history_df()
+            path = os.path.join(self.backup_dir(), f'{self.strategy}_{self.symbol}_profit_history.csv')
+            df_profit.to_csv(path, index=False)
+        except:
+            pass
+        if judge:
+            self.close_all_positions()
+            return
         t1 = datetime.now()
         self.act.calc(df)
         t2 = datetime.now()
