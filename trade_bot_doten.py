@@ -351,7 +351,7 @@ def is_trade_time(symbol):
     # 休憩時間　# 07:00 ～ 08:15, 16:30 ～ 21:15はトレードしない
     rest = [
                 [[7, 0], [8, 15]], 
-                [[16, 30], [21, 15]]
+                [[16, 30], [17, 00]]
             ]
     now = datetime.now()
     for [hour0, min0], [hour1, min1] in rest:
@@ -387,7 +387,7 @@ def test():
 def MarinPie():
     strategy = 'MaronPie'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.02],
+                ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
                 ['JP225', 10], 
                 ['US30', 0.1],
@@ -399,7 +399,7 @@ def MarinPie():
 def montblanc():
     strategy = 'Montblanc'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.02],
+                ['XAUUSD', 0.01],
                 #['USDJPY', 0.1],
                 ['JP225', 10], 
                 #['US30', 0.1],

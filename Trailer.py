@@ -95,8 +95,9 @@ class Position:
         return d
 
 class Trailer:
-    def __init__(self, symbol):
+    def __init__(self, symbol, strategy):
         self.symbol = symbol
+        self.strategy = strategy
         self.history = []
         mt5 = Mt5Trade( AXIORY_SUMMER_TIME_BEGIN_MONTH,
                         AXIORY_SUMMER_TIME_BEGIN_WEEK,
@@ -106,10 +107,35 @@ class Trailer:
          
         mt5.set_symbol(symbol)
         self.mt5 = mt5
-        self.mt5.connect()
+        # === Trailing-stop configuration (current P/L only) ===
+        self.trail_enabled = True
+        self.trail_mode = 'pct'          # 'abs' or 'pct'
+        self.trail_start_trigger = 4000.0  # activate when current_unreal >= this
+        self.trail_distance = 30.0        # allowed drawdown (abs or pct)
+        self.trail_step_lock = None      # e.g., 2.0 to ratchet lock line by steps
+        self.trail_min_positions = 1
+        # Negative region handling (耐える設定)
+        self.neg_grace_bars = 0          # tolerate first N negative bars
+        self.neg_hard_stop = 2000        # force close if current_unreal <= -value
+        self.activate_from = 'breakeven' # 'breakeven' or 'rebound'
+        self.rebound_from_trough = 0.0   # needed improvement to activate (abs or pct)
+
+        # === Trailing-stop state ===
+        self.trailing_activated = False
+        self.equity_peak = 0.0           # peak of current_unreal since activation
+        self.equity_peak_time = None
+        self.lock_line = None            # close if current_unreal <= lock_line
+        self.neg_bars = 0                # consecutive negative bars
+        self.unreal_trough = 0.0         # min current_unreal while negative
+        
+        
+    def append_to_history(self, time, judge, metrics):
+        v =  [self.symbol, time, judge] + metrics + [self.trailing_activated, self.equity_peak, self.equity_peak_time, self.lock_line, self.neg_bars, self.unreal_trough]
+        self.history.append(v)
         
     def hisotry_df(self):
-        df = pd.DataFrame(data= self.history, columns=['symbol', 'jst', 'count', 'win_rate', 'profit', 'profit_value'])
+        columns = ['symbol', 'jst',  'judge', 'count', 'win_rate', 'profit', 'profit_value', 'activated', 'peak', 'peak_time', 'lock', 'neg_bars', 'through']
+        df = pd.DataFrame(data= self.history, columns=columns)
         return df
         
     def timestamp2jst(self, ts):
@@ -117,6 +143,11 @@ class Trailer:
         utc = self.mt5.severtime2utc([t])
         jst = utc[0].astimezone(JST)
         return jst
+    
+    def backup_dir(self):
+        dir_path = f'./trading/{self.strategy}/{self.symbol}'
+        os.makedirs(dir_path, exist_ok=True)
+        return dir_path
     
     def get_positions(self):
         mt5_positions = self.mt5.get_positions(self.symbol)
@@ -156,23 +187,115 @@ class Trailer:
             win_rate = 0
         return [n, win_rate, profit_sum, profit_value_sum]
     
+    def get_path(self):
+        now = datetime.now().astimezone(JST)
+        filename = f"{self.strategy}_{self.symbol}_profits_history_{now.year}-{now.month}-{now.day}.csv"
+        return os.path.join(self.backup_dir(), filename)    
+    
     def update(self):
         dic = self.get_positions()
         metrics = self.calc_metrics(dic)
-        h = [self.symbol, datetime.now().astimezone(JST)] + metrics
-        print(h)
-        self.history.append(h)
-        r = self.judge_trailing_stop()
-        if r:
-            self.mt5.close_all_position(self.symbol)
+        r = self.judge_trailing_stop(metrics)
+        if r > 0:
+            pass
+            #self.mt5.close_all_position(self.symbol)
+        self.append_to_history(datetime.now().astimezone(JST), r, metrics)
+        try:
+            df = self.hisotry_df()
+            df.to_csv(self.get_path(), index=False)
+        except:
+            pass
             
-    def judge_trailing_stop(self):
-        return False
+            
+    def judge_trailing_stop(self, metrics):
+        """
+        Decide whether to close all positions based on current (unrealized) P/L only.
+        Returns True to close, False to continue.
+        """
+        if not self.trail_enabled:
+            return 0
+        
+        n, win_rate, profit_sum, profit_value_sum = metrics
+        
+        if n < self.trail_min_positions:
+            self.neg_bars = 0
+            self.unreal_trough = 0.0
+            self.trailing_activated = False
+            self.lock_line = None
+            self.equity_peak = 0.0
+            return 0
+       
+        current_unreal = float(profit_sum)
+        now = datetime.now().astimezone(JST)
+        # Negative region handling
+        if current_unreal < 0:
+            self.neg_bars += 1
+            if (self.neg_bars == 1) or (current_unreal < self.unreal_trough):
+                self.unreal_trough = current_unreal
+            if self.neg_hard_stop is not None and current_unreal <= -abs(self.neg_hard_stop):
+                self._reset_trailing_negative_state(current_unreal, now)
+                print('Trailing Hard Stop', self.symbol, 'Profit', current_unreal, 'setting:', self.neg_hard_stop)
+                return 2
+            if self.neg_bars <= max(0, self.neg_grace_bars):
+                return 0
+            if self.activate_from == 'breakeven':
+                return 0
+            else:
+                if self.trail_mode == 'pct':
+                    need = abs(self.unreal_trough) * (self.rebound_from_trough / 100.0)
+                else:
+                    need = self.rebound_from_trough
+                improved = current_unreal - self.unreal_trough
+                if improved < need:
+                    return 0
+                self.trailing_activated = True
+        else:
+            self.neg_bars = 0
+            self.unreal_trough = 0.0
+            if self.activate_from == 'breakeven' and current_unreal >= self.trail_start_trigger:
+                self.trailing_activated = True
+        if not self.trailing_activated:
+            return 0
+        if current_unreal < self.trail_start_trigger:
+            return 0
+        if current_unreal > self.equity_peak:
+            self.equity_peak = current_unreal
+            self.equity_peak_time = now
+        dd_allow = self.equity_peak * (self.trail_distance / 100.0) if self.trail_mode=='pct' else self.trail_distance
+        new_lock = self.equity_peak - dd_allow
+        if self.lock_line is None:
+            self.lock_line = new_lock
+        else:
+            if new_lock > self.lock_line:
+                self.lock_line = new_lock
+            if self.trail_step_lock is not None:
+                step_val = (self.equity_peak * (self.trail_step_lock/100.0)) if self.trail_mode=='pct' else self.trail_step_lock
+                while (self.equity_peak - self.lock_line) > (dd_allow + step_val):
+                    self.lock_line += step_val
+        if current_unreal <= (self.lock_line if self.lock_line is not None else -1e18):
+            self.lock_line = None
+            self.equity_peak = current_unreal
+            self.equity_peak_time = now
+            self.trailing_activated = False
+            self.neg_bars = 0
+            self.unreal_trough = 0.0
+            print('Trailing Stop fired:', self.symbol, 'Profit:', current_unreal, self.lock_line)
+            return 1
+        return 0
 
-def execute(symbols):
+    def _reset_trailing_negative_state(self, current_unreal: float, now: datetime):
+        self.lock_line = None
+        self.equity_peak = current_unreal
+        self.equity_peak_time = now
+        self.trailing_activated = False
+        self.neg_bars = 0
+        self.unreal_trough = 0.0
+
+
+def execute(strategy, symbols):
     trailers = {}
     for i, symbol in enumerate(symbols):
-        trailer = Trailer(symbol)
+        trailer = Trailer(symbol, strategy)
         trailers[symbol ] = trailer
         if i == 0:
             Mt5Trade.connect()
@@ -194,4 +317,4 @@ def test():
      
 if __name__ == "__main__":
     symbols = ['JP225', 'XAUUSD']
-    execute(symbols)
+    execute('Montblanc', symbols)
