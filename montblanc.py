@@ -148,6 +148,7 @@ class Montblanc:
         self.micro_upper_line = ul
         self.micro_lower_line = ll
         self.trend = trend
+        self.update_counts = counts
         self.reversal = reversal
         self.trend_micro = trend_micro
         self.reversal_micro = reversal_micro

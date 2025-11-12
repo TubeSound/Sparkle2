@@ -162,6 +162,11 @@ class TradeBot:
         else:
             print(f'*マーケットクローズ: {self.symbol}')
             return False
+        
+    def now_str(self):
+        t = datetime.now()
+        return datetime.strftime(t, '%Y-%m-%d_%H')
+    
     
     def update(self):
         t0 = datetime.now()
@@ -189,10 +194,20 @@ class TradeBot:
         except:
             pass
         if judge:
+            print('Trailing Stop:', self.symbol, datetime.now())
             self.close_all_positions()
             return
         t1 = datetime.now()
         self.act.calc(df)
+        try:
+            df_save = self.act.signals_df()
+            dirpath = f'./trading/{self.strategy}'
+            os.makedirs(dirpath, exist_ok=True)
+            filename = f'{self.symbol}_signals_{self.now_str()}.csv'
+            filepath = os.path.join(dirpath, filename)
+            df_save.to_csv(filepath, index=False)
+        except:
+            pass
         t2 = datetime.now()
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
@@ -210,7 +225,7 @@ class TradeBot:
     def doten(self, signal):
         if signal == 0:
             return
-        print('doten', signal, self.symbol)
+        print('doten', signal, self.symbol, datetime.now())
         positions = self.trade_manager.positions.copy()
         for ticket, position in positions.items():
             if signal == 1:
@@ -288,8 +303,6 @@ class TradeBot:
         except Exception as e:
             print(' ... Entry Error', e)
             print(position_info)
-            
-
 
 def load_params(strategy, symbol, ver, volume, position_max):
     def array_str2int(s):
@@ -384,28 +397,28 @@ def test():
     params = load_params('NSDQ', 0.01, 20)
     print(params)
 
-def MarinPie():
+def maronpie():
     strategy = 'MaronPie'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.01],
+                #['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
-                ['JP225', 10], 
-                ['US30', 0.1],
-                ['US100', 0.1]
+                ['JP225', 5], 
+                #['US30', 0.1],
+                #['US100', 0.1]
             ]
-    execute(strategy, 4, items)    
+    execute(strategy, '4.1', items)    
 
 
 def montblanc():
     strategy = 'Montblanc'
     items = [    # [symbol, volume, sl_loose]
                 ['XAUUSD', 0.01],
-                #['USDJPY', 0.1],
-                ['JP225', 10], 
+                ['USDJPY', 0.1],
+                ['JP225', 5], 
                 #['US30', 0.1],
                 #['US100', 0.1]
             ]
-    execute(strategy, 3, items)    
+    execute(strategy, '4.1', items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    

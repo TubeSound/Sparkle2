@@ -4,6 +4,7 @@ import glob
 import pandas as pd
 import numpy as np
 import time
+from decimal import Decimal, ROUND_FLOOR
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
@@ -105,47 +106,78 @@ def plot_signals(ax, signals):
         ax.scatter(entry_time, entry_price, color=color, marker='^' if typ == 1 else 'v', s=100, label=f'{typ}_entry')
         ax.scatter(exit_time, exit_price, color=color, marker='x', s=100, label=f'{typ}_exit')
 
-def plot_markers(ax, timestamps, values, signal):
+def plot_markers(ax, ax2, sparkle:Sparkle2):
+    timestamp = sparkle.timestamp
+    cl = sparkle.cl
+    values = sparkle.mid_long_diff_pct
+    entry = sparkle.entry_direction
+    ext = sparkle.exit_reason
+    pivot = sparkle.pivot
+    n = len(entry)
     label_written0 = False
     label_written1 = False
-    for i in range(len(signal)):
-        if signal[i] == 1:
+    for i in range(n):
+        if pivot[i] == 1:
+            a = ax2
+            v = values
             marker='o'
             color='red'
             alpha=0.3
             s=50
-        elif signal[i] == -1:
+        elif pivot[i] == -1:
+            a = ax2
+            v = values
             marker='o'
             color='green'
             alpha=0.3
             s=50
-        elif signal[i] == 2:
+        elif entry[i] == Sparkle2.SHORT:
+            a = ax
+            v = cl
             marker='v'
             color='red'
             alpha=0.4
             s=100
             label='Sell'
-        elif signal[i] == -2:
+        elif entry[i] == Sparkle2.LONG:
+            a = ax
+            v = cl
             marker='^'
             color='green'
             alpha=0.4
             s=100 
             label='Buy'   
+        elif ext[i] > 0:
+            a = ax
+            marker='x'
+            color='gray'
+            alpha=0.6
+            s=200
+            text = Sparkle2.reason[ext[i]]
+            a.text(timestamp[i], cl[i], text)
         else:
             continue
-        if not label_written0 and signal[i] == 2:
-            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
+        if not label_written0 and entry[i] == Sparkle2.LONG:
+            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
             label_written0 = True
-        elif not label_written1 and signal[i] == -2:    
-            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
+        elif not label_written1 and entry[i] == Sparkle2.SHORT:    
+            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s, label=label)
             label_written1 = True
         else:
-            ax.scatter(timestamps[i], values[i], marker=marker, color=color, alpha=alpha, s=s)
+            a.scatter(timestamp[i], v[i], marker=marker, color=color, alpha=alpha, s=s)
 
-def analyze(title, csv_path):
-    SHORT_TERM = 10
-    MID_TERM = 20
-    LONG_TERM = 50
+def round_number(x: float, step: float) -> float:
+    """xをstep刻みの“下方向”キリ番に揃える"""
+    dx = Decimal(str(x))
+    ds = Decimal(str(step))
+    q  = (dx / ds).to_integral_value(rounding=ROUND_FLOOR)
+    return float(q * ds)
+
+
+def analyze(title, csv_path, graph_height):
+    SHORT_TERM = 13
+    MID_TERM = 25
+    LONG_TERM = 100
     df = read_data(csv_path)
     #df = df0.iloc[:60 * 2]
 
@@ -160,38 +192,80 @@ def analyze(title, csv_path):
     dic = {Columns.JST: timestamps_np, Columns.OPEN: op, Columns.HIGH: hi, Columns.LOW: lo, Columns.CLOSE: cl}
         
     t0 = time.time() 
-    sparkle = Sparkle2(SHORT_TERM, MID_TERM, LONG_TERM, 20, 0.02)
+    sparkle = Sparkle2(SHORT_TERM, MID_TERM, LONG_TERM, 2.0)
     sparkle.calc(dic)
     print('Elapsed Time: ', time.time() - t0)
-   
-    return plot_chart(title, timestamps_np, sparkle, SHORT_TERM, MID_TERM, LONG_TERM)
+    result = sparkle.simulate_trades()
+    print(result)
     
+    return plot_chart(title, timestamps_np, sparkle, SHORT_TERM, MID_TERM, LONG_TERM, graph_height)
+
+
+def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
+    for signal, label, color in zip(signals, labels, colors):
+        ax.plot(timestamp, signal, color=color, label=label)    
+    vmin = min(signals[0])
+    vmax = max(signals[0])
+    center = (vmax + vmin) / 2
+    center = round_number(center, graph_height / 8)
+    ax.set_ylim(center - graph_height / 2, center + graph_height / 2)
     
-def plot_chart(title, timestamp, sparkle, short_term, mid_term, long_term):
-    fig, axes = gridFig([5, 3, 2, 3, 3], (12, 11))
-    axes[0].plot(timestamp, sparkle.cl, color='gray', label='Close')
-    axes[0].plot(timestamp, sparkle.short, color='red', label = f'EMA({short_term})-Short')
-    axes[0].plot(timestamp, sparkle.mid, color='green', label=f'EMA({mid_term})-Mid')
-    axes[0].plot(timestamp, sparkle.long, color='blue', label=f'EMA({long_term})-Long')
+def plot_signal_marker(ax, sparkle: Sparkle2):
+    timestamp = sparkle.timestamp
+    cl = sparkle.cl
+    entries = sparkle.entries
+    exits = sparkle.exits
+    n = len(entries)
+    for i in range(n):
+        if entries[i] == Sparkle2.LONG:
+            marker = '^'
+            color = 'green'
+        elif entries[i] == Sparkle2.SHORT:
+            marker = 'v'
+            color = 'red'
+            label = 'SHORT'
+        else:
+            continue
+        ax.scatter(timestamp[i], cl[i], marker=marker, color=color)
     
-    axes[1].plot(timestamp, sparkle.mid_long_diff_pct, color='blue', label='(Mid-Long)%')
-    plot_markers(axes[1], timestamp, sparkle.mid_long_diff_pct, sparkle.pivot)
+    for i in range(n):
+        if exits[i] == 1:
+            marker = 'X'
+            color = 'gray'
+            ax.scatter(timestamp[i], cl[i], marker=marker, color=color)
     
-    axes[2].plot(timestamp, sparkle.pivot, color='blue', alpha=0.4, label='Pivot')
-    #axes[2].plot(timestamp, sparkle.pivot, color='red', alpha=0.4, label='Pivot-filtered')
+def plot_chart(title, timestamp, sparkle, short_term, mid_term, long_term, graph_height):
+    fig, axes = gridFig([6, 3, 2, 3, 2, 2], (12, 12))
+    timestamp = sparkle.timestamp
+    colors = ['gray', 'red', 'green', 'blue']
+    labels = ['Close', f'EMA({short_term})-Short', f'EMA({mid_term})-Mid', f'EMA({long_term})-Long']
+    plot_prices(axes[0], timestamp, [sparkle.cl, sparkle.short, sparkle.mid, sparkle.long],  colors, labels, graph_height)
+    plot_signal_marker(axes[0], sparkle)
     
-    axes[3].plot(timestamp, sparkle.atrp, color='purple', label='ATRP')
+    axes[1].plot(timestamp, sparkle.short_slope, color='red', label='EMA-Short slope')
+    axes[1].plot(timestamp, sparkle.mid_slope, color='green', label='EMA-Mid slope')
+    axes[1].plot(timestamp, sparkle.long_slope, color='blue', label='EMA-Long slope')
+    draw_bar_level(axes[1], timestamp, sparkle.mid_slope, 2.0)
     
-    axes[4].plot(timestamp, sparkle.short_slope, color='red', label='EMA-Short slope')
-    axes[4].plot(timestamp, sparkle.mid_slope, color='green', label='EMA-Mid slope')
-    axes[4].plot(timestamp, sparkle.long_slope, color='blue', label='EMA-Long slope')
+    axes[2].plot(timestamp, sparkle.entries, color='red', alpha=0.5, label='Sign')
+    axes[2].plot(timestamp, sparkle.exits, color='blue', alpha=0.5, label='Sign')
     
-    draw_bar_level(axes[4], timestamp, sparkle.mid_slope, 0.2)
+    axes[3].plot(timestamp, sparkle.mid_long_diff_pct, color='green', alpha=0.4, label='EMA Mid-Long%')
+    axes[3].plot(timestamp, sparkle.short_mid_diff_pct, color='red', alpha=0.4, label='EMA Short-Mid%')
+    draw_bar(axes[3], timestamp, sparkle.squeeze)
+    
+    axes[4].plot(timestamp, sparkle.cl, color='gray', label='Close')
+    ax = axes[4].twinx()
+    ax.plot(timestamp, sparkle.mid_long_diff_pct, color='orange', label='(Mid-Long)%')
+    #plot_markers(axes[3], ax, sparkle)
+    
+    axes[5].plot(timestamp, sparkle.atrp, color='purple', label='ATRP')
     
     t0 = timestamp[0]
     t1 = timestamp[-1]
     title += '          ' + str(t0) + ' -> ' + str(t1)
     axes[0].set_title(title)
+    
     [ax.legend() for ax in axes]
 
     plt.xticks(rotation=45)
@@ -199,94 +273,29 @@ def plot_chart(title, timestamp, sparkle, short_term, mid_term, long_term):
     plt.close()
     return fig
     
-def simulate_trades(timestamps,
-                    price,
-                    ema_mid,
-                    mid_long_pct,
-                    pivot, atrp,
-                    touch_exit=True,
-                    k_sl=1.2,
-                    m_trail=1.5,
-                    T=60,
-                    r=1.2):
-    pos = 0
-    entry_i = None
-    mfe = None
-    exits = []
-    for i in range(len(price)):
-        # entry
-        if pos == 0:
-            if pivot[i] == -2:
-                pos, entry_i, mfe = +1, i, 0.0
-            elif pivot[i] ==  2:
-                pos, entry_i, mfe = -1, i, 0.0
-            continue
 
-        # dynamic refs
-        ret = (price[i] - price[entry_i]) / price[entry_i]
-        mfe = max(mfe, ret) if pos > 0 else max(mfe, -ret)
-        atrp_now = atrp[entry_i] / 100.0
-
-        # 1) hard stop
-        if pos > 0 and ret <= -k_sl * atrp_now:
-            exits.append(("SL", entry_i, i))
-            pos = 0
-        elif pos < 0 and -ret <= -k_sl * atrp_now:
-            exits.append(("SL",entry_i, i))
-            pos = 0
-
-        # 2) trailing
-        if pos != 0:
-            trail = m_trail * atrp_now
-            if pos > 0 and (mfe - ret) >= trail:
-                exits.append(("TR", entry_i, i))
-                pos = 0
-            if pos < 0 and (mfe - (-ret)) >= trail:
-                exits.append(("TR", entry_i, i))
-                pos=0
-
-        # 3) EMA-Mid touch
-        if pos != 0 and touch_exit and abs(price[i] - ema_mid[i]) / price[i] < 1e-4:
-            exits.append(("MID", entry_i, i))
-            pos=0
-
-        # 4) growth fail within T bars
-        if pos != 0 and (i-entry_i) >= T:
-            depth0 = abs(mid_long_pct[entry_i])
-            grown  = abs(mid_long_pct[i]) >= r * depth0
-            slope_ok = (ema_mid[i] - ema_mid[i - 1]) > 0 if pos > 0 else (ema_mid[i] - ema_mid[i - 1]) < 0
-            if not (grown and slope_ok):
-                exits.append(("GF", entry_i, i))
-                pos=0
-
-        # 5) opposite pivot
-        if pos > 0 and pivot[i] == 2:
-            exits.append(("OPP", entry_i, i))
-            pos=0
-        if pos < 0 and pivot[i] == -2: 
-            exits.append(("OPP", entry_i, i))
-            pos =  0
-    return exits
 
     
-def main(symbol):
+def main(symbol, graph_height):
     timeframe = 'M1'
     year = 2025
-    for month in [4, 5, 6, 7, 8]:
+    for month in range(4, 10):
         mstr = str(month).zfill(2)
         files = glob.glob(f"../DayTradeData/{timeframe}/{symbol}/{year}-{mstr}/*")
         writer = HtmlWriter()
         for file in files:
             _, filename = os.path.split(file)
             name, _ = os.path.splitext(filename)
-            fig = analyze(f'{name}', file)
+            fig = analyze(f'{name}', file, graph_height)
             writer.add_fig(fig)
-        os.makedirs(f'./PPP/{symbol}', exist_ok=True)
-        path = f'./PPP/{symbol}/{symbol}_{year}_{mstr}.html'
+        os.makedirs(f'./Sparkle2/{symbol}', exist_ok=True)
+        path = f'./Sparkle2/{symbol}/{symbol}_{year}_{mstr}.html'
         writer.write(path)
     
 
 if __name__ == "__main__":
     #os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    symbol = 'NSDQ'
-    main(symbol)
+    symbols =  ['NSDQ', 'NIKKEI', 'DOW', 'XAUUSD', 'USDJPY']
+    heights = [500, 500, 500, 5, 4]
+    for symbol, height in zip(symbols, heights):
+        main(symbol, height)

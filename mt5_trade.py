@@ -274,8 +274,8 @@ class Mt5Trade:
             self.close_position(position, position.volume)
     
     def get_ticks_jst(self, jst_begin, jst_end):
-        t_begin = self.jst2utc(jst_begin)
-        t_end = self.jst2utc(jst_end)
+        t_begin = jst2utc(jst_begin)
+        t_end = jst2utc(jst_end)
         return self.get_ticks(t_begin, t_end)
 
     def get_ticks(self, symbol, utc_begin, utc_end):
@@ -292,8 +292,8 @@ class Mt5Trade:
         return df
     
     def get_rates_jst(self, symbol, timeframe: TimeFrame, jst_begin, jst_end):
-        t_begin = self.jst2utc(jst_begin)
-        t_end = self.jst2utc(jst_end)
+        t_begin = jst2utc(jst_begin)
+        t_end = jst2utc(jst_end)
         return self.get_rates_utc(symbol, timeframe, t_begin, t_end)
     
     def get_rates_utc(self, symbol, timeframe, utc_begin, utc_end):

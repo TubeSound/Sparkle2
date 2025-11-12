@@ -402,7 +402,7 @@ def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
         center = round_number(center, graph_height / 8)
         ax.set_ylim(center - graph_height / 2, center + graph_height / 2)
 
-def plot_signal_marker(ax, timestamp, signal, values):
+def plot_signal_marker(ax, timestamp, signal, values, marker=None):
     if type(timestamp) == pd.Series:
         timestamp = timestamp.to_list()
     if type(signal) == pd.Series:
@@ -413,34 +413,38 @@ def plot_signal_marker(ax, timestamp, signal, values):
     for i in range(n):
         if signal[i] == 1:
             # Long
-            marker = '^'
+            if marker is None:
+                mark = '^'
+            else:
+                mark = marker
             color = 'green'
             alpha=0.5
         elif signal[i] == -1:
             # Short
-            marker = 'v'
+            if marker is None:
+                mark = 'v'
+            else:
+                mark = marker
             color = 'red'
             alpha=0.5
-        elif signal[i] == 2:
-            #Close
-            marker = 'x'
-            color = 'gray'
-            alpha=1
         else:
             continue
-        ax.scatter(timestamp[i], values[i], marker=marker, color=color, alpha=alpha, s=100)
+        ax.scatter(timestamp[i], values[i], marker=mark, color=color, alpha=alpha, s=100)
     
 def plot_chart(title, maron: Montblanc, begin, end, param: MontblancParam, graph_height):
-    fig, axes = gridFig([7, 1, 7, 1], (18, 15))
+    fig, axes = gridFig([7, 7, 1, 1, 1], (18, 18))
     timestamp = maron.timestamp
-    dic = {'time': maron.timestamp,
+    dic = {'jst': maron.timestamp,
+           'open': maron.op,
            'high': maron.hi,
            'low': maron.lo,
            'close': maron.cl,
            'upper': maron.upper_line,
            'lower': maron.lower_line,
+           'atr': maron.atr,
            'trend': maron.trend,
            'trend_micro': maron.trend_micro,
+           'peaks': maron.peaks,
            'entries': maron.entries,
            'exits': maron.exits}
     df0 = pd.DataFrame(dic)
@@ -448,13 +452,15 @@ def plot_chart(title, maron: Montblanc, begin, end, param: MontblancParam, graph
     colors = ['gray', 'red', 'green']
     labels = ['Close',  'supertrend(+)', 'supertrend(-)']
     plot_prices(axes[0], df['time'], [df['close'], df['upper'], df['lower']], colors, labels, graph_height)
-    axes[1].plot(df['time'], df['trend'], color='blue', label='Trend')
-    labels = ['Close', 'High', 'Low']
-    plot_prices(axes[2], df['time'], [df['close'], df['high'], df['low']], colors, labels, graph_height) 
-    axes[2].plot(df['time'], df['trend_micro'], color='red', label='TrendMicrio')
-    plot_signal_marker(axes[2], df['time'], df['entries'], df['close'])
-    plot_signal_marker(axes[2], df['time'], df['exits'], df['close'])
-    axes[3].plot(timestamp, maron.reversal_micro, color='blue', label='ReversalMicro')
+    plot_signal_marker(axes[0], df['time'], df['entries'], df['close'])
+    plot_signal_marker(axes[0], df['time'], df['exits'], df['close'], marker='x')
+    labels = ['Close']
+    plot_prices(axes[1], df['time'], [df['close']], colors, labels, graph_height) 
+    plot_signal_marker(axes[1], df['time'], df['peaks'], df['close'])
+    
+    axes[2].plot(timestamp, maron.entries, color='blue', label='Entry')
+    axes[3].plot(timestamp, maron.exits, color='blue', label='Exit')
+    axes[4].plot(timestamp, maron.reversal_micro, color='blue', label='ReversalMicro')
     
     title += '    ' + str(begin) + ' -> ' + str(end)
     axes[0].set_title(title)
@@ -531,13 +537,23 @@ def optimize(symbol, ver):
     iver = int(ver)
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
-    if iver == 4 and symbol == 'JP225':
-        tbegin = datetime(2025, 10, 27).astimezone(JST)
-        tend = datetime(2025, 10, 29).astimezone(JST)         
-    elif iver == 3:
+    
+    if iver == 4 and symbol == 'US30':
+        tbegin = datetime(2025, 10, 1).astimezone(JST)
+        tend = datetime(2025, 11, 7).astimezone(JST)  
+    elif iver == 4 and symbol == 'US100':
+        tbegin = datetime(2025, 10, 1).astimezone(JST)
+        tend = datetime(2025, 11, 6).astimezone(JST)  
+    elif iver == 4 and symbol == 'XAUUSD':
+        tbegin = datetime(2025, 10, 1).astimezone(JST)
+        tend = datetime(2025, 11, 6).astimezone(JST)        
+    elif iver == 4:
+        tbegin = datetime(2025, 1, 1).astimezone(JST)
+        tend = datetime(2025, 2, 15).astimezone(JST)         
+    elif iver >= 3:
         tbegin = datetime(2025, 1, 1).astimezone(JST)
         tend = datetime(2025, 3, 30).astimezone(JST)  
-    if iver >= 1 and symbol == 'JP225':
+    elif iver >= 1 and symbol == 'JP225':
         tbegin = datetime(2025, 9, 1).astimezone(JST)
         tend = datetime(2025, 10, 24).astimezone(JST)   
     else:
@@ -577,29 +593,40 @@ def loop():
             tp = 20
         main(symbol,  tp, sl, height)    
     
+    
+def load_data(symbol, begin, end):
+    from mt5_trade import Mt5Trade
+    from common import TimeFrame
+    mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
+    mt5.connect()
+    mt5.set_symbol(symbol) 
+    t = begin - timedelta(days=5)
+    df = mt5.get_rates_jst(symbol, TimeFrame.M1, t, end)
+    return df
+
 def test():
-    symbol = 'XAUUSD'
-    ver = 3
-    dic = load_all_data(symbol)
-    df0 = pd.DataFrame(dic)
-    t0 = datetime(2025, 10, 29).astimezone(JST)
-    t1 = datetime(2025, 10, 31).astimezone(JST)
-    df1 = df0[(df0['jst'] >= t0)]
-    index = df1.index[-1]
-    length = 60 * 24
-    df = df0.iloc[index - length: index + 1, :]
+    symbol = 'JP225'
+    ver = '4.1'
+    begin = datetime(2025, 11, 7).astimezone(JST)
+    end = datetime(2025, 11, 8, 8).astimezone(JST)
+    if symbol == 'JP225':
+        height = 2500
+    elif symbol == 'XAUUSD':
+        height = 150
+    
+    df = load_data(symbol, begin, end)
     jst = df['jst'].to_list()
+    
     params = load_params('Montblanc', symbol, ver)
     param = params[0]
     maron = Montblanc(symbol, param)
     maron.calc(df)
-    begin = datetime(2025, 10, 31, 20).astimezone(JST)
-    end = datetime(2025, 11, 1).astimezone(JST)
-    fig = plot_chart(symbol, maron, begin, end, param, 50)
+
+    fig = plot_chart(symbol, maron, begin, end, param, height)
     os.makedirs('./debug', exist_ok=True)
     fig.savefig(f'./debug/montblanc_{symbol}.png')
     
-    (r, columns), _ = maron.simulate_doten(t0, t1)
+    (r, columns), _ = maron.simulate_doten(begin, end)
     df_metric = pd.DataFrame(data=r, columns=columns)
     df_metric.to_csv(f'./debug/montblanc_{symbol}_trade.csv', index=False)  
     #df_profit.to_csv('./debug/montblanc_jp225_profit.csv', index=False)
@@ -613,5 +640,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    #optimize('USDJPY', 3.1)
+    #optimize('US30', 4.1)
     test()

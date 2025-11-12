@@ -110,8 +110,8 @@ class Trailer:
         # === Trailing-stop configuration (current P/L only) ===
         self.trail_enabled = True
         self.trail_mode = 'pct'          # 'abs' or 'pct'
-        self.trail_start_trigger = 4000.0  # activate when current_unreal >= this
-        self.trail_distance = 30.0        # allowed drawdown (abs or pct)
+        self.trail_start_trigger = 5000.0  # activate when current_unreal >= this
+        self.trail_distance = 20.0        # allowed drawdown (abs or pct)
         self.trail_step_lock = None      # e.g., 2.0 to ratchet lock line by steps
         self.trail_min_positions = 1
         # Negative region handling (耐える設定)
@@ -196,9 +196,9 @@ class Trailer:
         dic = self.get_positions()
         metrics = self.calc_metrics(dic)
         r = self.judge_trailing_stop(metrics)
-        if r > 0:
-            pass
-            #self.mt5.close_all_position(self.symbol)
+        if r > 0 and self.trail_enabled:
+            #pass
+            self.mt5.close_all_position(self.symbol)
         self.append_to_history(datetime.now().astimezone(JST), r, metrics)
         try:
             df = self.hisotry_df()
@@ -234,7 +234,7 @@ class Trailer:
                 self.unreal_trough = current_unreal
             if self.neg_hard_stop is not None and current_unreal <= -abs(self.neg_hard_stop):
                 self._reset_trailing_negative_state(current_unreal, now)
-                print('Trailing Hard Stop', self.symbol, 'Profit', current_unreal, 'setting:', self.neg_hard_stop)
+                print('Trailing Hard Stop', self.symbol, 'Profit', current_unreal, 'peak:', self.equity_peak,  str(datetime.now()))
                 return 2
             if self.neg_bars <= max(0, self.neg_grace_bars):
                 return 0
@@ -279,7 +279,7 @@ class Trailer:
             self.trailing_activated = False
             self.neg_bars = 0
             self.unreal_trough = 0.0
-            print('Trailing Stop fired:', self.symbol, 'Profit:', current_unreal, self.lock_line)
+            print('Trailing Stop fired:', self.symbol, 'Profit:', current_unreal, 'peak:', self.equity_peak, str(datetime.now()))
             return 1
         return 0
 
@@ -301,7 +301,7 @@ def execute(strategy, symbols):
             Mt5Trade.connect()
     while True:
         for symbol in symbols:
-            scheduler.enter(5, 1 + 1, trailers[symbol].update)
+            scheduler.enter(60, 1, trailers[symbol].update)
             scheduler.run()
         
         
@@ -316,5 +316,5 @@ def test():
     print('metric', r)
      
 if __name__ == "__main__":
-    symbols = ['JP225', 'XAUUSD']
+    symbols = ['JP225', 'XAUUSD', 'USDJPY']
     execute('Montblanc', symbols)
