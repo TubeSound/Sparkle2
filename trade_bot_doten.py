@@ -211,16 +211,42 @@ class TradeBot:
         t2 = datetime.now()
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
+
+        self.update_sl(self.act.upper_line, self.act.lower_line)
+        
         # ドテン
         ext = self.act.exits[-1]
         self.doten(ext)
         ent = self.act.entries[-1]     
         if ent == Signal.LONG:
-            self.entry(Signal.LONG, jst[-1])
+            sl = self.act.lower_line[-1]
+            self.entry(Signal.LONG, jst[-1], sl)
             self.save_trade_manager()
         elif ent == Signal.SHORT:
-            self.entry(Signal.SHORT, jst[-1])
+            sl = self.act.upper_line[-1]
+            self.entry(Signal.SHORT, jst[-1], sl)
             self.save_trade_manager()
+        
+    def update_sl(self, upper_line, lower_line):
+        mt5_positions = self.mt5.get_positions(self.symbol)
+        for p in mt5_positions:
+            if p.symbol != self.symbol:
+                continue
+            if self.mt5.is_long(p.type):
+                if np.isnan(lower_line[-2]):
+                    continue
+                if lower_line[-1] != lower_line[-2]:
+                    # change sl
+                    sl = lower_line[-1]     
+                    self.mt5.modify_sl(self.symbol, p.ticket, sl)
+                    self.debug_print('Changed Stoploss', self.symbol, p.sl, '->', sl)
+            elif self.mt5.is_short(p.type):
+                if np.isnan(upper_line[-2]):
+                    continue
+                if upper_line[-1] != upper_line[-2]:
+                    sl = upper_line[-1]
+                    self.mt5.modify_sl(self.symbol, p.ticket, sl)
+                    self.debug_print('Changed Stoploss', self.symbol, p.sl, '->', sl)
         
     def doten(self, signal):
         if signal == 0:
@@ -258,23 +284,6 @@ class TradeBot:
         positions = self.trade_manager.positions.copy()
         for ticket, position in positions.items():
             self.close_position(position)
-                
-    def update_sl(self):
-        positions = self.trade_manager.positions.copy()
-        for ticket, position in positions.items():
-            if (self.param.sl_loose is not None) and (position.sl_updated is False):
-                if position.order_signal == Signal.LONG:
-                    sl = position.entry_price - self.param.sl
-                elif position.order_signal == Signal.SHORT:
-                    sl = position.entry_price + self.param.sl
-                else:
-                    continue
-                ret = self.mt5.modify_sl(self.symbol, position.ticket, sl)
-                if ret:
-                    position.sl_updated = True        
-                else:
-                    print('error update sl', self.symbol, 'ticket:', ticket, 'stoploss price:', sl)
-                    #self.close_position(position)
                     
     def mt5_position_num(self):
         positions = self.mt5.get_positions(self.symbol)
@@ -284,9 +293,8 @@ class TradeBot:
                 count += 1
         return count
         
-    def entry(self, signal, time):
+    def entry(self, signal, time, sl):
         volume = self.param.volume
-        sl = self.param.sl
         #tp = self.param.tp                     
         position_max = int(self.param.position_max)
         num =  self.mt5_position_num()
@@ -412,13 +420,13 @@ def maronpie():
 def montblanc():
     strategy = 'Montblanc'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.01],
+                ['XAUUSD', 0.002],
                 ['USDJPY', 0.1],
-                ['JP225', 5], 
-                #['US30', 0.1],
-                #['US100', 0.1]
+                ['JP225', 10], 
+                ['US30', 0.1],
+                ['US100', 0.1]
             ]
-    execute(strategy, '4.1', items)    
+    execute(strategy, 5.3, items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    

@@ -159,9 +159,9 @@ class Mt5Trade:
 
         if stoploss > 0:
             if signal == Signal.LONG:
-                request['sl'] = float(price - stoploss)
+                request['sl'] = float(stoploss)
             elif signal == Signal.SHORT:
-                request['sl'] = float(price + stoploss)
+                request['sl'] = float(stoploss)
         
         if takeprofit is None:
             takeprofit = 0

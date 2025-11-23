@@ -230,32 +230,32 @@ def load_params(strategy, symbol, ver):
     return params
         
 def generate_param(symbol:str, param: MontblancParam):
+    param.mode = 2
     param.position_max = rand_select([1, 2, 3, 4, 5, 7, 10])
-    param.ma_term = rand_step(10, 30, 5)
-    param.ma_method = 'ema'
-    param.atr_term = rand_step(5, 30, 5)
-    param.trend_minutes = rand_step(5, 30, 5)
+    param.atr_term = rand_step(5, 50, 5)
+    param.trend_minutes = rand_select([10, 15, 30, 60, 120, 180, 240])
     param.trend_multiply = rand_step(2.0, 4.0, 0.2)
-    param.trend_micro_minutes = 1
+    param.trend_micro_minutes = rand_select([1, 2, 5, 10])
+    param.atr_term_micro = rand_step(5, 50, 5)
     param.trend_micro_multiply = rand_step(1.0, 3.0, 0.1)    
     if symbol in ['JP225', 'US30']:
-        param.sl = rand_step(40, 100, 20)
+        param.sl = rand_step(200, 500, 100)
     elif symbol in ['US100', 'GER40']:
-        param.sl = rand_step(30, 80, 10)
+        param.sl = rand_step(100, 200, 50)
     elif symbol in ['SP']:
-        param.sl = rand_step(2, 30, 2)   
+        param.sl = rand_step(20, 50, 10)   
     elif symbol in ['XAUUSD']:
-        param.sl = rand_step(1, 10, 1)        
+        param.sl = rand_step(5, 20, 5)        
     elif symbol in ['USDJPY']:
-        param.sl = rand_step(0.02, 0.1, 0.01)
+        param.sl = rand_step(0.1, 1, 0.1)
     elif symbol in ['USOIL', 'XAGUSD']:
-        param.sl = rand_step(0.025, 0.1, 0.025)
+        param.sl = rand_step(0.1, 1, 0.1)
     elif symbol in ['UK100']:
-        param.sl = rand_step(10, 20, 5)
+        param.sl = rand_step(20, 50, 10)
     else:
         raise Exception('No sl defined', symbol)
 
-def optimizer(symbol, dic, tbegin, tend, repeat=1000):
+def optimizer0(symbol, dic, tbegin, tend, repeat=1000):
     df0 = pd.DataFrame(dic)
     df =  df0[(df0['jst'] >= tbegin) & (df0['jst'] <= tend)]
     hours = [[0, 6], [8, 8], [16, 8]]
@@ -317,9 +317,46 @@ def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     df_result = pd.DataFrame(dic)
     df_result = df_result.sort_values('profit', ascending=False)
     return df_result
+
+
+def optimizer(symbol, dic, tbegin, tend, repeat=1000):
+    df0 = pd.DataFrame(dic)
+    t = tbegin - timedelta(days=10)
+    df =  df0[(df0['jst'] >= t) & (df0['jst'] <= tend)]
+    #for short_term, long_term, th, sl, tp in itertools.product(short_terms, long_terms, ths, sls, tps):
+    param = MontblancParam()
+    
+    result = []
+    for i in range(repeat):
+        generate_param(symbol, param)
+        maron = Montblanc(symbol, param)
+        maron.calc(df)
+        (rows, columns), _ = maron.simulate_doten(tbegin, tend)
+        df_metric = pd.DataFrame(data=rows, columns=columns)
+        metric = performance(df_metric)
+        d1 = param.to_dict()
+        d0 = {'i': i}
+        d = dict(**d0, **d1)
+        dic = dict(**d, **metric)
+        result.append(dic)
+        print('Montblanc Optimize Phase1', i, symbol, 'profit:', metric['profit'])           
+    keys = list(result[0].keys())
+    dic = {}
+    for key in ['symbol'] + keys:
+        array = []
+        for d in result:
+            if key == 'symbol':
+                array.append(symbol)
+            else:
+                array.append(d[key])
+        dic[key] = array
+    df_result = pd.DataFrame(dic)
+    df_result = df_result.sort_values('profit', ascending=False)
+    return df_result
     
     
-def evaluate(symbol, ver, params, dir_path):
+    
+def evaluate0(symbol, ver, params, dir_path):
     dic = load_all_data(symbol)
     df = pd.DataFrame(dic)
     jst = dic['jst']
@@ -391,6 +428,71 @@ def evaluate(symbol, ver, params, dir_path):
     df_result = pd.DataFrame(dic)
     df_result = df_result.sort_values('profit', ascending=False)
     df_result.to_excel(os.path.join(dir_path, f'{symbol}_v{ver}_best_trade_params.xlsx'), index=False)
+    
+    
+def evaluate(symbol, ver, params, dir_path):
+    dic = load_all_data(symbol)
+    df = pd.DataFrame(dic)
+    jst = dic['jst']
+    
+    tbegin = datetime(jst[0].year, jst[0].month, jst[0].day).astimezone(JST)
+    tend = datetime(jst[-1].year, jst[-1].month, jst[-1].day).astimezone(JST) - timedelta(days=1)
+
+    length = 2 * 24 * 60
+
+    i = 0
+    result = []
+    for param in params:
+        maron = Montblanc(symbol, param)
+        rows = []
+        t = tbegin
+        while t <= tend:
+            t0 = t - timedelta(days=4)
+            t1 = t + timedelta(days=1)
+            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
+            if len(df1) < length:
+                t += timedelta(days=1)
+                continue
+            index = df1.index[-1]   
+            if index - length < 0:
+                t += timedelta(days=1)
+                continue
+            df2 = df.iloc[index - length: index + 1, :]      
+            maron.calc(df2)
+            (r, columns), _ = maron.simulate_doten(t, t1)
+            if len(r) > 0:
+                rows += r
+            t = t1            
+        if len(rows) == 0:
+            continue
+        df_metric = pd.DataFrame(data=rows, columns=columns)
+        metric = performance(df_metric)
+        d1 = param.to_dict()
+        d0 = {'i': i}
+        d = dict(**d0, **d1)
+        dic = dict(**d, **metric)
+        result.append(dic)
+        print('Montblanc Phase2', i, symbol, 'profit:', metric['profit'])
+        if metric['profit'] > 0:
+            save_profit_graph(symbol, f"{i}_profit", df_metric, dir_path)
+        i += 1
+    
+    keys = list(result[0].keys())
+    dic = {}
+    for key in ['symbol', 'version'] + keys:
+        array = []
+        for d in result:
+            if key == 'symbol':
+                array.append(symbol)
+            elif key == 'version':
+                array.append(ver)
+            else:
+                array.append(d[key])
+        dic[key] = array
+    df_result = pd.DataFrame(dic)
+    df_result = df_result.sort_values('profit', ascending=False)
+    df_result.to_excel(os.path.join(dir_path, f'{symbol}_v{ver}_best_trade_params.xlsx'), index=False)
+
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for signal, label, color in zip(signals, labels, colors):
@@ -431,36 +533,22 @@ def plot_signal_marker(ax, timestamp, signal, values, marker=None):
             continue
         ax.scatter(timestamp[i], values[i], marker=mark, color=color, alpha=alpha, s=100)
     
-def plot_chart(title, maron: Montblanc, begin, end, param: MontblancParam, graph_height):
+def plot_chart(title, df0: pd.DataFrame, begin, end, param: MontblancParam, graph_height):
     fig, axes = gridFig([7, 7, 1, 1, 1], (18, 18))
-    timestamp = maron.timestamp
-    dic = {'jst': maron.timestamp,
-           'open': maron.op,
-           'high': maron.hi,
-           'low': maron.lo,
-           'close': maron.cl,
-           'upper': maron.upper_line,
-           'lower': maron.lower_line,
-           'atr': maron.atr,
-           'trend': maron.trend,
-           'trend_micro': maron.trend_micro,
-           'peaks': maron.peaks,
-           'entries': maron.entries,
-           'exits': maron.exits}
-    df0 = pd.DataFrame(dic)
-    df = df0[(df0['time'] >= begin) & (df0['time'] <= end)]
+    
+    df = df0[(df0['jst'] >= begin) & (df0['jst'] <= end)]
     colors = ['gray', 'red', 'green']
     labels = ['Close',  'supertrend(+)', 'supertrend(-)']
-    plot_prices(axes[0], df['time'], [df['close'], df['upper'], df['lower']], colors, labels, graph_height)
-    plot_signal_marker(axes[0], df['time'], df['entries'], df['close'])
-    plot_signal_marker(axes[0], df['time'], df['exits'], df['close'], marker='x')
+    plot_prices(axes[0], df['jst'], [df['close'], df['upper'], df['lower']], colors, labels, graph_height)
+    plot_signal_marker(axes[0], df['jst'], df['entries'], df['close'])
+    plot_signal_marker(axes[0], df['jst'], df['exits'], df['close'], marker='x')
     labels = ['Close']
-    plot_prices(axes[1], df['time'], [df['close']], colors, labels, graph_height) 
-    plot_signal_marker(axes[1], df['time'], df['peaks'], df['close'])
+    plot_prices(axes[1], df['jst'], [df['close']], colors, labels, graph_height) 
+    plot_signal_marker(axes[1], df['jst'], df['peaks'], df['close'])
     
-    axes[2].plot(timestamp, maron.entries, color='blue', label='Entry')
-    axes[3].plot(timestamp, maron.exits, color='blue', label='Exit')
-    axes[4].plot(timestamp, maron.reversal_micro, color='blue', label='ReversalMicro')
+    axes[2].plot(df['jst'], df['entries'], color='blue', label='Entry')
+    axes[3].plot(df['jst'], df['exits'], color='blue', label='Exit')
+    axes[4].plot(df['jst'], df['peaks'], color='blue', label='ReversalMicro')
     
     title += '    ' + str(begin) + ' -> ' + str(end)
     axes[0].set_title(title)
@@ -538,18 +626,27 @@ def optimize(symbol, ver):
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
     
-    if iver == 4 and symbol == 'US30':
+    if ver == 5.4:
+        tbegin = datetime(2025, 11, 18, 9).astimezone(JST)
+        tend = datetime(2025, 11, 18, 22).astimezone(JST)  
+    elif ver == 5.3 and symbol == 'XAUUSD':
+        tbegin = datetime(2025, 11, 13, 15).astimezone(JST)
+        tend = datetime(2025, 11, 19, 0).astimezone(JST)  
+    elif ver == 5.3:
+        tbegin = datetime(2025, 11, 15, 0).astimezone(JST)
+        tend = datetime(2025, 11, 15, 8).astimezone(JST)  
+    elif iver >= 4 and symbol == 'US30':
         tbegin = datetime(2025, 10, 1).astimezone(JST)
         tend = datetime(2025, 11, 7).astimezone(JST)  
-    elif iver == 4 and symbol == 'US100':
+    elif iver >= 4 and symbol == 'US100':
+        tbegin = datetime(2025, 2, 1).astimezone(JST)
+        tend = datetime(2025, 5, 1).astimezone(JST)  
+    elif iver >= 4 and symbol == 'XAUUSD':
         tbegin = datetime(2025, 10, 1).astimezone(JST)
-        tend = datetime(2025, 11, 6).astimezone(JST)  
-    elif iver == 4 and symbol == 'XAUUSD':
+        tend = datetime(2025, 11, 15).astimezone(JST)        
+    elif iver >= 4:
         tbegin = datetime(2025, 10, 1).astimezone(JST)
-        tend = datetime(2025, 11, 6).astimezone(JST)        
-    elif iver == 4:
-        tbegin = datetime(2025, 1, 1).astimezone(JST)
-        tend = datetime(2025, 2, 15).astimezone(JST)         
+        tend = datetime(2025, 11, 6).astimezone(JST)         
     elif iver >= 3:
         tbegin = datetime(2025, 1, 1).astimezone(JST)
         tend = datetime(2025, 3, 30).astimezone(JST)  
@@ -559,7 +656,7 @@ def optimize(symbol, ver):
     else:
         tbegin = datetime(2025, 2, 3).astimezone(JST)
         tend = datetime(2025, 4, 26).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=1000)
+    df = optimizer(symbol, dic, tbegin, tend, repeat=3000)
     df = df.head(50)
     print(df)
     dirpath = f'./Montblanc/v{ver}/Optimize/{symbol}'
@@ -605,14 +702,14 @@ def load_data(symbol, begin, end):
     return df
 
 def test():
-    symbol = 'JP225'
+    symbol = 'XAUUSD'
     ver = '4.1'
-    begin = datetime(2025, 11, 7).astimezone(JST)
-    end = datetime(2025, 11, 8, 8).astimezone(JST)
+    begin = datetime(2025, 11, 12, 17).astimezone(JST)
+    end = datetime(2025, 11, 13, 2).astimezone(JST)
     if symbol == 'JP225':
-        height = 2500
+        height = 300
     elif symbol == 'XAUUSD':
-        height = 150
+        height = 30
     
     df = load_data(symbol, begin, end)
     jst = df['jst'].to_list()
@@ -622,7 +719,7 @@ def test():
     maron = Montblanc(symbol, param)
     maron.calc(df)
 
-    fig = plot_chart(symbol, maron, begin, end, param, height)
+    fig = plot_chart(symbol, maron.result_df(), begin, end, param, height)
     os.makedirs('./debug', exist_ok=True)
     fig.savefig(f'./debug/montblanc_{symbol}.png')
     
@@ -633,12 +730,13 @@ def test():
     
     
 def test2():
-    dic = load_all_data('NIKKEI')  
-    print(dic['jst'][-10:])
-    print(dic['utc'][-10:])
+    for symbol in ['JP225', 'US30', 'US100', 'XAUUSD', 'USDJPY']:
+        dic = load_all_data(symbol)  
+        print(dic['jst'][-10:])
+        #print(dic['utc'][-10:])
     
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    #optimize('US30', 4.1)
-    test()
+    #optimize('USDJPY', 5.4)
+    test2()

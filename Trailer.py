@@ -116,7 +116,7 @@ class Trailer:
         self.trail_min_positions = 1
         # Negative region handling (耐える設定)
         self.neg_grace_bars = 0          # tolerate first N negative bars
-        self.neg_hard_stop = 2000        # force close if current_unreal <= -value
+        self.neg_hard_stop = None        # force close if current_unreal <= -value
         self.activate_from = 'breakeven' # 'breakeven' or 'rebound'
         self.rebound_from_trough = 0.0   # needed improvement to activate (abs or pct)
 
@@ -316,5 +316,5 @@ def test():
     print('metric', r)
      
 if __name__ == "__main__":
-    symbols = ['JP225', 'XAUUSD', 'USDJPY']
+    symbols = ['JP225', 'XAUUSD', 'USDJPY', 'US100', 'US30']
     execute('Montblanc', symbols)
