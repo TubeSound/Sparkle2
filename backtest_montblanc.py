@@ -230,14 +230,14 @@ def load_params(strategy, symbol, ver):
     return params
         
 def generate_param(symbol:str, param: MontblancParam):
-    param.mode = 2
     param.position_max = rand_select([1, 2, 3, 4, 5, 7, 10])
+    param.ema_term_entry = rand_step(10, 60, 5)
+    param.filter_term_exit = rand_step(10, 60, 5)
     param.atr_term = rand_step(5, 50, 5)
-    param.trend_minutes = rand_select([10, 15, 30, 60, 120, 180, 240])
-    param.trend_multiply = rand_step(2.0, 4.0, 0.2)
-    param.trend_micro_minutes = rand_select([1, 2, 5, 10])
-    param.atr_term_micro = rand_step(5, 50, 5)
-    param.trend_micro_multiply = rand_step(1.0, 3.0, 0.1)    
+    param.trend_major_minutes = rand_select([30, 60, 90, 120, 180, 240])
+    param.trend_major_multiply = rand_step(1.5, 3.5, 0.5)
+    param.trend_minutes = rand_select([5, 10, 15, 30])
+    param.trend_multiply = rand_step(1.5, 3.5, 0.5)  
     if symbol in ['JP225', 'US30']:
         param.sl = rand_step(200, 500, 100)
     elif symbol in ['US100', 'GER40']:
@@ -254,70 +254,6 @@ def generate_param(symbol:str, param: MontblancParam):
         param.sl = rand_step(20, 50, 10)
     else:
         raise Exception('No sl defined', symbol)
-
-def optimizer0(symbol, dic, tbegin, tend, repeat=1000):
-    df0 = pd.DataFrame(dic)
-    df =  df0[(df0['jst'] >= tbegin) & (df0['jst'] <= tend)]
-    hours = [[0, 6], [8, 8], [16, 8]]
-    
-    i = 0
-    result = []
-    #for short_term, long_term, th, sl, tp in itertools.product(short_terms, long_terms, ths, sls, tps):
-    for _ in range(repeat):                   
-        param = MontblancParam()
-        generate_param(symbol, param)
-        maron = Montblanc(symbol, param)
-        rows = []
-        columns = []
-        t = tbegin
-        length = 2 * 24 * 60
-        while t <= tend:
-            t0 = t - timedelta(days=10)
-            t1 = t + timedelta(days=1)
-            df1 = df[(df['jst'] >= t0) & (df['jst'] <= t1)]
-            if len(df1) < length:
-                t += timedelta(days=1)
-                continue
-            index = df1.index[-1]   
-            if index - length < 0:
-                t += timedelta(days=1)
-                continue
-            df2 = df0[index - length: index + 1]            
-            maron.calc(df2)
-            for b, l in hours:
-                t0 = t
-                t0 = t0.replace(hour=b)
-                t1 = t0 + timedelta(hours=l)
-                (r, columns), _ = maron.simulate_doten(t0, t1)
-                if len(r) > 0:
-                    rows += r
-            t += timedelta(days=1)
-        if len(rows) == 0:
-            continue
-        df_metric = pd.DataFrame(data=rows, columns=columns)
-        metric = performance(df_metric)
-        d1 = param.to_dict()
-        d0 = {'i': i}
-        d = dict(**d0, **d1)
-        dic = dict(**d, **metric)
-        result.append(dic)
-        print('Montblanc Optimize Phase1', i, symbol, 'profit:', metric['profit'])
-        i += 1
-        
-    keys = list(result[0].keys())
-    dic = {}
-    for key in ['symbol'] + keys:
-        array = []
-        for d in result:
-            if key == 'symbol':
-                array.append(symbol)
-            else:
-                array.append(d[key])
-        dic[key] = array
-    df_result = pd.DataFrame(dic)
-    df_result = df_result.sort_values('profit', ascending=False)
-    return df_result
-
 
 def optimizer(symbol, dic, tbegin, tend, repeat=1000):
     df0 = pd.DataFrame(dic)
@@ -495,15 +431,17 @@ def evaluate(symbol, ver, params, dir_path):
 
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
-    for signal, label, color in zip(signals, labels, colors):
-        ax.plot(timestamp, signal, color=color, alpha=0.5, label=label)    
+    for i in range(len(signals)):
+        ax.plot(timestamp, signals[i], color=colors[i], alpha=0.5, label=labels[i])    
     if graph_height is not None:
         vmin = min(signals[0])
         vmax = max(signals[0])
         center = (vmax + vmin) / 2
         center = round_number(center, graph_height / 8)
-        ax.set_ylim(center - graph_height / 2, center + graph_height / 2)
-
+        try:
+            ax.set_ylim(center - graph_height / 2, center + graph_height / 2)
+        except:
+            pass
 def plot_signal_marker(ax, timestamp, signal, values, marker=None):
     if type(timestamp) == pd.Series:
         timestamp = timestamp.to_list()
@@ -534,21 +472,53 @@ def plot_signal_marker(ax, timestamp, signal, values, marker=None):
         ax.scatter(timestamp[i], values[i], marker=mark, color=color, alpha=alpha, s=100)
     
 def plot_chart(title, df0: pd.DataFrame, begin, end, param: MontblancParam, graph_height):
-    fig, axes = gridFig([7, 7, 1, 1, 1], (18, 18))
+    fig, axes = gridFig([7, 7, 7, 2, 5], (18, 18))
     
     df = df0[(df0['jst'] >= begin) & (df0['jst'] <= end)]
-    colors = ['gray', 'red', 'green']
-    labels = ['Close',  'supertrend(+)', 'supertrend(-)']
-    plot_prices(axes[0], df['jst'], [df['close'], df['upper'], df['lower']], colors, labels, graph_height)
+    if len(df) < 100:
+        return None
+    jst = df['jst'].to_list()
+    colors = ['gray', 'red', 'green', 'blue']
+    labels = ['Close',  'supertrend(+)', 'supertrend(-)', 'EMA']
+    plot_prices(axes[0], df['jst'], [df['close'], df['upper_major'], df['lower_major']], colors, labels, graph_height)
     plot_signal_marker(axes[0], df['jst'], df['entries'], df['close'])
-    plot_signal_marker(axes[0], df['jst'], df['exits'], df['close'], marker='x')
-    labels = ['Close']
-    plot_prices(axes[1], df['jst'], [df['close']], colors, labels, graph_height) 
-    plot_signal_marker(axes[1], df['jst'], df['peaks'], df['close'])
+    #plot_signal_marker(axes[0], df['jst'], df['exits'], df['close'], marker='x')
     
-    axes[2].plot(df['jst'], df['entries'], color='blue', label='Entry')
-    axes[3].plot(df['jst'], df['exits'], color='blue', label='Exit')
-    axes[4].plot(df['jst'], df['peaks'], color='blue', label='ReversalMicro')
+    labels = ['Close', 'Upper', 'Lower', 'EMA_entry']
+    plot_prices(axes[1], df['jst'], [df['close'], df['upper_minor'], df['lower_minor'], df['ema_entry']], colors, labels, graph_height) 
+    plot_signal_marker(axes[1], df['jst'], df['reversal_micro'], df['close'])
+    labels = ['Close', 'EMA']
+    colors = ['gray', 'Red']
+    
+    cl = df['close'].to_list()
+    trend = df['trend'].to_list()
+    n = len(cl)
+    buy = np.full(n, np.nan)
+    sell = np.full(n, np.nan)
+    for i in range(n):
+        if n == 0 and n == n - 1:
+            buy[i] = cl[i]
+            sell[i] = cl[i]
+        else:
+            if trend[i] == 1:
+                buy[i] = cl[i]
+            elif trend[i] == -1:
+                sell[i] = cl[i]
+
+    colors = ['blue', 'green', 'red' ]
+    labels = ['ema_entry', 'buy', 'sell']
+    plot_prices(axes[2], df['jst'], [df['ema_entry'], buy, sell], colors, labels, graph_height) 
+    plot_signal_marker(axes[2], df['jst'], df['entries'], df['close'])
+    plot_signal_marker(axes[2], df['jst'], df['exits'], df['close'], marker='x')
+    
+    axes[3].plot(df['jst'], df['trend_minor'], color='blue', label='Trend(Minor)')
+    
+    axes[4].plot(df['jst'], df['slope_exit'], color='blue', label='Slope for exit')
+    plot_signal_marker(axes[4], jst, df['exits'], df['slope_exit'], marker='x')
+    axes[4].hlines([0], jst[0],jst[-1], color="black", linestyles='dashed') 
+    #axes[4].plot(df['jst'], df['trend'], color='blue', label='Trend')
+    #axes[5].plot(df['jst'], df['trend_minor'], color='blue', label='Trend(Minor)')
+    
     
     title += '    ' + str(begin) + ' -> ' + str(end)
     axes[0].set_title(title)
@@ -621,48 +591,25 @@ def main(symbol, tp, sl, graph_height):
     save_result(symbol, '#0', df, dir_path)
 
         
-def optimize(symbol, ver):
+def optimize(symbol, ver, pass_phase1=False):
     iver = int(ver)
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
+
+    tbegin = datetime(2025, 11, 18, 9).astimezone(JST)
+    tend = datetime(2025, 11, 18, 22).astimezone(JST)  
     
-    if ver == 5.4:
-        tbegin = datetime(2025, 11, 18, 9).astimezone(JST)
-        tend = datetime(2025, 11, 18, 22).astimezone(JST)  
-    elif ver == 5.3 and symbol == 'XAUUSD':
-        tbegin = datetime(2025, 11, 13, 15).astimezone(JST)
-        tend = datetime(2025, 11, 19, 0).astimezone(JST)  
-    elif ver == 5.3:
-        tbegin = datetime(2025, 11, 15, 0).astimezone(JST)
-        tend = datetime(2025, 11, 15, 8).astimezone(JST)  
-    elif iver >= 4 and symbol == 'US30':
-        tbegin = datetime(2025, 10, 1).astimezone(JST)
-        tend = datetime(2025, 11, 7).astimezone(JST)  
-    elif iver >= 4 and symbol == 'US100':
-        tbegin = datetime(2025, 2, 1).astimezone(JST)
-        tend = datetime(2025, 5, 1).astimezone(JST)  
-    elif iver >= 4 and symbol == 'XAUUSD':
-        tbegin = datetime(2025, 10, 1).astimezone(JST)
-        tend = datetime(2025, 11, 15).astimezone(JST)        
-    elif iver >= 4:
-        tbegin = datetime(2025, 10, 1).astimezone(JST)
-        tend = datetime(2025, 11, 6).astimezone(JST)         
-    elif iver >= 3:
-        tbegin = datetime(2025, 1, 1).astimezone(JST)
-        tend = datetime(2025, 3, 30).astimezone(JST)  
-    elif iver >= 1 and symbol == 'JP225':
-        tbegin = datetime(2025, 9, 1).astimezone(JST)
-        tend = datetime(2025, 10, 24).astimezone(JST)   
-    else:
-        tbegin = datetime(2025, 2, 3).astimezone(JST)
-        tend = datetime(2025, 4, 26).astimezone(JST)
-    df = optimizer(symbol, dic, tbegin, tend, repeat=3000)
-    df = df.head(50)
-    print(df)
     dirpath = f'./Montblanc/v{ver}/Optimize/{symbol}'
-    os.makedirs(dirpath, exist_ok=True)
-    df.to_excel(os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx"))
-   
+    path = os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx")
+    if pass_phase1:
+        df = pd.read_excel(path)
+        print(df)
+    else:
+        df = optimizer(symbol, dic, tbegin, tend, repeat=3000)
+        df = df.head(50)
+        print(df)
+        os.makedirs(dirpath, exist_ok=True)
+        df.to_excel(path)   
     params = []
     for i in range(len(df)):
         d = df.iloc[i, :]
@@ -702,31 +649,43 @@ def load_data(symbol, begin, end):
     return df
 
 def test():
-    symbol = 'XAUUSD'
-    ver = '4.1'
-    begin = datetime(2025, 11, 12, 17).astimezone(JST)
-    end = datetime(2025, 11, 13, 2).astimezone(JST)
+    symbol = 'JP225'
+    ver = '4.3'
+    
     if symbol == 'JP225':
-        height = 300
+        height =1000
     elif symbol == 'XAUUSD':
         height = 30
     
-    df = load_data(symbol, begin, end)
-    jst = df['jst'].to_list()
-    
-    params = load_params('Montblanc', symbol, ver)
-    param = params[0]
-    maron = Montblanc(symbol, param)
-    maron.calc(df)
+    dir_path = f'./debug/{symbol}'
+    os.makedirs(dir_path, exist_ok=True)
+     
+    year = 2025
+    month = 11
+    for day in range(1, 23):
+        begin = datetime(year, month, day, 8).astimezone(JST)
+        end = begin + timedelta(hours=16)
+        df = load_data(symbol, begin, end)
+        if len(df) < 1000:
+            continue
+        jst = df['jst'].to_list()
+        
+        #params = load_params('Montblanc', symbol, ver)
+        #param = params[0]
+        param = MontblancParam()
+        maron = Montblanc(symbol, param)
+        maron.calc(df)
 
-    fig = plot_chart(symbol, maron.result_df(), begin, end, param, height)
-    os.makedirs('./debug', exist_ok=True)
-    fig.savefig(f'./debug/montblanc_{symbol}.png')
-    
-    (r, columns), _ = maron.simulate_doten(begin, end)
-    df_metric = pd.DataFrame(data=r, columns=columns)
-    df_metric.to_csv(f'./debug/montblanc_{symbol}_trade.csv', index=False)  
-    #df_profit.to_csv('./debug/montblanc_jp225_profit.csv', index=False)
+        fig = plot_chart(symbol, maron.result_df(), begin, end, param, height)
+        if fig is None:
+            continue
+        path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}.png')
+        fig.savefig(path)        
+        #(r, columns), _ = maron.simulate_doten(begin, end)
+        #df_metric = pd.DataFrame(data=r, columns=columns)
+        #path = os.path.join(dir_path, f'montblanc_{symbol}_trade_{year}-{month}-{day}.csv')
+        #df_metric.to_csv(path, index=False)  
+        #df_profit.to_csv('./debug/montblanc_jp225_profit.csv', index=False)
     
     
 def test2():
@@ -738,5 +697,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    #optimize('USDJPY', 5.4)
-    test2()
+    optimize('USDJPY', 1, pass_phase1=True)
+    #test()

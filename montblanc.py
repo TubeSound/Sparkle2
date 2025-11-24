@@ -2,18 +2,18 @@ import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5api
 
-from technical import calc_sma, calc_ema, calc_atr, is_nans, trend_heikin, super_trend
+from technical import calc_sma, calc_ema, calc_atr, is_nans, trend_heikin, super_trend, ema_reversal, slope_trend
 from common import Columns, Indicators
 from trade_manager import TradeManager, Signal, PositionInfo
 
 class MontblancParam:
-    mode = 0
+    ema_term_entry = 12
+    filter_term_exit = 24
     atr_term = 14
-    trend_minutes = 5
+    trend_major_minutes = 60
+    trend_major_multiply = 2.0
+    trend_minutes = 15
     trend_multiply = 2.0
-    trend_micro_minutes = 1
-    atr_term_micro = 20
-    trend_micro_multiply = 2.0 
     sl = 0.5
     sl_loose = None
     position_max = 5
@@ -21,13 +21,13 @@ class MontblancParam:
 
     def to_dict(self):
         dic = {
-                'mode': self.mode,
+                'ema_term_entry': self.ema_term_entry,
+                'filter_term_exit': self.filter_term_exit,
                 'atr_term': self.atr_term,
+                'trend_major_minutes': self.trend_major_minutes,
+                'trend_major_multiply': self.trend_major_multiply,
                 'trend_minutes': self.trend_minutes,
                 'trend_multiply': self.trend_multiply,
-                'trend_micro_minutes': self.trend_micro_minutes,
-                'atr_term_micro': self.atr_term_micro,
-                'trend_micro_multiply': self.trend_micro_multiply,
                 'sl': self.sl,
                 'sl_loose': self.sl_loose,
                 'position_max': self.position_max,
@@ -37,14 +37,14 @@ class MontblancParam:
     
     @staticmethod
     def load_from_dic(dic: dict):
-        param = MontblancParam()
-        param.mode = int(dic['mode'])   
+        param = MontblancParam()   
+        param.ema_term_entry = int(dic['ema_term_entry'])
+        param.filter_term_exit = int(dic['filter_term_exit'])
         param.atr_term = int(dic['atr_term'])
+        param.trend_major_minutes = int(dic['trend_major_minutes'])
+        param.trend_major_multiply = float(dic['trend_major_multiply'])
         param.trend_minutes = int(dic['trend_minutes'])
         param.trend_multiply = float(dic['trend_multiply'])
-        param.trend_micro_minutes = int(dic['trend_micro_minutes'])
-        param.atr_term_micro = int(dic['atr_term_micro'])
-        param.trend_micro_multiply = float(dic['trend_micro_multiply'])
         param.sl = float(dic['sl'])
         if dic['sl_loose'] == None:
             param.sl_loose = None
@@ -69,11 +69,19 @@ class Montblanc:
                 'entries': self.entries,
                 'exits': self.exits,
                 'trend': self.trend,
-                'reversal': self.reversal,
-                'peaks': self.peaks,
+                'trend_minor': self.trend_minor,
+                'trend_major': self.trend_major,
+                'trend_micro': self.trend_micro,
+                'reversal_major': self.reversal_major,
+                'reversal_minor': self.reversal_minor,
+                'reversal_micro': self.reversal_micro,
                 'atr': self.atr,
-                'upper': self.upper_line,
-                'lower': self.lower_line
+                'upper_minor': self.upper_minor,
+                'lower_minor': self.lower_minor,
+                'upper_major': self.upper_major,
+                'lower_major': self.lower_major,
+                'ema_entry': self.ema_entry,
+                'slope_exit': self.slope_exit,
                 } 
         
         df = pd.DataFrame(dic)
@@ -137,6 +145,46 @@ class Montblanc:
         return out
 
         
+    def calc_ema(self, cl, term, trend):
+        def search_term(trend, j):
+            begin = None
+            for i in range(j, n):
+                if begin == None:
+                    if trend[i] == 1 or trend[i] == -1:
+                        begin = i
+                        status = trend[i]
+                else:
+                    if trend[i] != status:
+                        end = i - 1   
+                        return (begin, end), False               
+            if begin is not None:
+                end = len(trend) - 1
+                return (begin, len(trend) - 1), True
+            else:
+                return (None, None), True
+                  
+        n = len(cl)
+        ma = np.full(n, np.nan)
+        i = 0
+        while True :
+            (begin, end), finish = search_term(trend, i)
+            if begin is None:
+                break
+            d = cl[begin: end + 1]
+            ma[begin : end + 1] = calc_ema(d, term)
+            if finish:
+                break
+            i = end + 1
+        return ma
+        
+    def mask(self, signal, trend):
+        out = signal.copy()
+        n = len(signal)
+        for i in range(n):
+            if trend[i] != 1 and trend[i] != -1:
+                out[i] = np.nan
+        return out
+
     def calc(self, df):
         self.timestamp = df['jst'].tolist()
         self.op = df[Columns.OPEN].to_numpy()
@@ -144,110 +192,66 @@ class Montblanc:
         self.lo = df[Columns.LOW].to_numpy()
         self.cl = df[Columns.CLOSE].to_numpy()
         self.atr = calc_atr(self.hi, self.lo, self.cl, self.param.atr_term)
-        trend, reversal, upper_line, lower_line, counts = super_trend(df, self.param.trend_minutes, self.param.atr_term, self.param.trend_multiply)
-        trend_micro, reversal_micro, ul, ll, counts_micro = super_trend(df, self.param.trend_micro_minutes, self.param.atr_term_micro, self.param.trend_micro_multiply)
-        self.upper_line = upper_line
-        self.lower_line = lower_line
-        self.micro_upper_line = ul
-        self.micro_lower_line = ll
-        self.peaks = reversal_micro
-        self.trend = trend
+        # major trend
+        self.trend_major, self.reversal_major, um, lm, _ = super_trend(df, self.param.trend_major_minutes, self.param.atr_term, self.param.trend_major_multiply)
+        self.upper_major = um
+        self.lower_major = lm
+        
+        # minor trend
+        self.trend_minor, self.reversal_minor, upper_minor, lower_minor, counts = super_trend(df, self.param.trend_minutes, self.param.atr_term, self.param.trend_multiply)
+        self.upper_minor = upper_minor
+        self.lower_minor = lower_minor
         self.update_counts = counts
-        self.reversal = reversal
-        self.trend_micro = trend_micro
-        self.reversal_micro = reversal_micro
-        if self.param.mode == 0:
-            self.entries, self.exits = self.detect_signals0()
-        elif self.param.mode == 1:
-            self.entries, self.exits = self.detect_signals1()
-        elif self.param.mode == 2:
-            self.entries, self.exits = self.detect_signals2()
-            
-    def detect_signals0(self):
-        n = len(self.cl)
-        entries = np.full(n, 0)
-        exits = np.full(n, 0)
-        for i in range(1, n):
-            # trendが変化したときにクローズ
-            if self.reversal[i] != 0:
-                exits[i] = self.reversal[i]
-            # microトレンドが変化したところでエントリー
-            if self.trend[i] == 1 and self.reversal_micro[i] == 1:
-                entries[i] = Signal.LONG
-            elif self.trend[i] == -1 and self.reversal_micro[i] == -1:
-                entries[i] = Signal.SHORT
-        return entries, exits
-    
-    def detect_signals1(self):
-        n = len(self.cl)
-        entries = np.full(n, 0)
-        exits = np.full(n, 0)
-        last_peak_price = None
-        for i in range(1, n):
-            # trendが変化したときにクローズ
-            if self.reversal[i] != 0:
-                exits[i] = self.reversal[i]
-            # microトレンドが変化したところでエントリー
-            if self.trend[i] == 1 and self.reversal_micro[i] == 1:
-                go = False
-                if last_peak_price is None:
-                    go = True
-                else:
-                    if self.cl[i] >= last_peak_price:
-                        go = True
-                if go:
-                    entries[i] = Signal.LONG
-                last_peak_price = self.cl[i]
-            elif self.trend[i] == -1 and self.reversal_micro[i] == -1:
-                go = False
-                if last_peak_price is None:
-                    go = True
-                else:
-                    if self.cl[i] <= last_peak_price:
-                        go = True
-                if go:        
-                    entries[i] = Signal.SHORT
-                last_peak_price = self.cl[i]        
-            if self.reversal[i] != 0:
-                last_peak_price = None
-        return entries, exits
-     
-    def detect_signals2(self):
-        n = len(self.cl)
-        entries = np.full(n, 0)
-        exits = np.full(n, 0)
-        last_peak_price = None
-        for i in range(1, n):
-            # trendが変化したときにクローズ
-            if self.reversal[i] != 0:
-                exits[i] = self.reversal[i]
-            # microトレンドが変化したところでエントリー
-            if self.trend[i] == 1 and self.reversal_micro[i] == 1 and self.cl[i] > self.lower_line[i]:
-                go = False
-                if last_peak_price is None:
-                    go = True
-                    last_peak_price = self.cl[i]
-                else:
-                    if self.cl[i] >= last_peak_price:
-                        go = True
-                        last_peak_price = self.cl[i]
-                if go:
-                    entries[i] = Signal.LONG
+        
+        # micro trend
+        self.reversal_micro, self.ema_entry = ema_reversal(df, self.param.ema_term_entry)
+        self.trend_micro, slope = slope_trend(self.ema_entry, 5) 
+        
+        # total trend
+        self.trend = self.make_trend([self.trend_major, self.trend_minor, self.trend_micro])
                 
-            elif self.trend[i] == -1 and self.reversal_micro[i] == -1 and self.cl[i] < self.upper_line[i]:
-                go = False
-                if last_peak_price is None:
-                    go = True
-                    last_peak_price = self.cl[i]
-                else:
-                    if self.cl[i] <= last_peak_price:
-                        go = True
-                        last_peak_price = self.cl[i]     
-                if go:        
-                    entries[i] = Signal.SHORT
-
-        return entries, exits
+        # entry
+        self.entries = self.make_entry(self.trend, self.reversal_micro)
+ 
+        # exit
+        self.trend_exit, self.slope_exit = slope_trend(self.ema_entry, self.param.filter_term_exit)
+        self.exits = self.make_exit(self.slope_exit, self.trend_minor)
+        
+            
+    def make_trend(self, trends):
+        def is_match(vector):
+            for i in range(1, len(vector)):
+                if vector[0] != vector[i]:
+                    return False
+            return True
+        n = len(trends[0])
+        trend = np.full(n, 0)
+        for i in range(n):
+            d = [t[i] for t in trends]
+            if is_match(d):
+                trend[i] = d[0]
+        return trend
     
+    def make_entry(self, trend, reversal_micro):
+        n = len(self.cl)
+        entries = np.full(n, 0)
+        for i in range(n):
+            if reversal_micro[i] == trend[i]:
+                entries[i] = trend[i]
+        return entries
+    
+    def make_exit(self, slope, trend_minor):
+        n = len(slope)
+        exits = np.full(n, 0)
+        for i in range(1, n):
+            if trend_minor[i] > 0:
+                if slope[i - 1] >= 0 and slope[i] < 0:
+                    exits[i] = -1
+            elif trend_minor[i] < 0:
+                if slope[i - 1] <= 0 and  slope[i] > 0:
+                    exits[i] = 1
+        return exits
+                        
     def simulate_doten(self, tbegin, tend):
         def cleanup(i, h, l):
             close_tickets = []

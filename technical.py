@@ -512,21 +512,47 @@ def trade_signals(timestamps, prices, ema_mid, ema_fast_mid, ema_mid_slow,  vola
 
     return signals
 
-def slope(vector):
-    n = len(vector)
-    d = np.array(vector)
-    m, offset = np.polyfit(range(n), d, 1)
-    return m, offset 
+def linear_regression(x, y):
+    n = len(x)
+    sum_x = sum(x)
+    sum_y = sum(y)
+    sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+    sum_x2 = sum(xi * xi for xi in x)
 
+    denominator = n * sum_x2 - sum_x * sum_x
+    if denominator == 0:
+        raise ValueError("ゼロ除算になるので回帰できません")
 
-def slopes(vector, window):
-    n = len(vector)
+    slope = (n * sum_xy - sum_x * sum_y) / denominator  # 傾き
+    offset = (sum_y * sum_x2 - sum_x * sum_xy) / denominator  # 切片
+    return slope, offset
+
+def slopes(signal: list, window: int, minutes: int, tolerance=0.0):
+    n = len(signal)
     out = np.full(n, np.nan)
     for i in range(window - 1, n):
-        d = vector[i - window + 1: i + 1]
-        m, offset = slope(d)
-        out[i] = m
+        d = signal[i - window + 1: i + 1]
+        if np.min(d) == 0:
+            continue        
+        if i == n -1:
+            pass
+        m, offset = linear_regression(range(window), d)
+        if abs(m) > tolerance:
+            #out[i] = m / np.mean(d[:3]) * 100.0 / (window * minutes)  * 60 * 24
+            out[i] = m / np.mean(d[-1]) * 100.0 / minutes  * 60 * 24
     return out
+
+def slope_trend(vector, window, minutes=1, tolerance=1e-3):
+    n = len(vector)
+    trend = np.full(n, 0)
+    slope = slopes(vector, window, minutes)
+    for i in range(n):
+        if abs(slope[i]) > tolerance:
+            if slope[i] > 0:
+                trend[i] = 1
+            else:
+                trend[i] = -1
+    return trend, slope
 
 def detect_range(vector, window, height_max):
     n = len(vector)
@@ -691,8 +717,8 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
     bottom_line = np.full(n1, np.nan)
     top_line = np.full(n1, np.nan)
         
-    current = 0
-    trend1 = np.full(n1, 0)
+    current = np.nan
+    trend1 = np.full(n1, np.nan)
     trend_reversal = np.full(n1, 0)
     counts = np.full(n1, 0)
     count = 0
@@ -700,7 +726,7 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
         if np.isnan(atr[i]):
             continue
         else:
-            if current == 0:
+            if np.isnan(current):
                 if cl[i] > op[i]:
                     current = 1
                 else:
@@ -767,7 +793,17 @@ def super_trend(df_m1: pd.DataFrame, minutes: int, atr_term: int, band_multiply:
                 counts0[i] = counts0[i - 1]
     return trend0, trend_reversal0, top_line0, bottom_line0, counts0
     
-    
+def ema_reversal(df: pd.DataFrame, ema_term: int):
+    cl = df[Columns.CLOSE].to_list()
+    n = len(cl)
+    ema = calc_ema(cl, ema_term)
+    reversal = np.full(n, 0)
+    for i in range(1, n):
+        if cl[i - 1] <= ema[i - 1] and cl[i] > ema[i]:
+            reversal[i] = 1
+        elif cl[i - 1] >= ema[i - 1] and cl[i] < ema[i]:
+            reversal[i] = -1
+    return reversal, ema    
 
 def test():
     def read_data(path):
