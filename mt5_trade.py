@@ -142,7 +142,7 @@ class Mt5Trade:
         elif signal == Signal.SHORT:
             typ =  mt5api.ORDER_TYPE_SELL
             
-        print('Entry symbol:', symbol, 'signal:', signal, 'Price:', price, 'volume:', volume, 'deviation:', deviation)
+        #print('Entry symbol:', symbol, 'signal:', signal, 'Price:', price, 'volume:', volume, 'deviation:', deviation)
             
         request = {
             "action": mt5api.TRADE_ACTION_DEAL,

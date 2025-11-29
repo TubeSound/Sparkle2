@@ -432,7 +432,8 @@ def evaluate(symbol, ver, params, dir_path):
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
     for i in range(len(signals)):
-        ax.plot(timestamp, signals[i], color=colors[i], alpha=0.5, label=labels[i])    
+        color, width = colors[i]
+        ax.plot(timestamp, signals[i], color=color, linewidth=width, alpha=0.5, label=labels[i])    
     if graph_height is not None:
         vmin = min(signals[0])
         vmax = max(signals[0])
@@ -472,52 +473,27 @@ def plot_signal_marker(ax, timestamp, signal, values, marker=None):
         ax.scatter(timestamp[i], values[i], marker=mark, color=color, alpha=alpha, s=100)
     
 def plot_chart(title, df0: pd.DataFrame, begin, end, param: MontblancParam, graph_height):
-    fig, axes = gridFig([7, 7, 7, 2, 5], (18, 18))
-    
+    fig, axes = gridFig([7, 7, 2, 5], (18, 12))
     df = df0[(df0['jst'] >= begin) & (df0['jst'] <= end)]
     if len(df) < 100:
         return None
     jst = df['jst'].to_list()
-    colors = ['gray', 'red', 'green', 'blue']
-    labels = ['Close',  'supertrend(+)', 'supertrend(-)', 'EMA']
-    plot_prices(axes[0], df['jst'], [df['close'], df['upper_major'], df['lower_major']], colors, labels, graph_height)
-    plot_signal_marker(axes[0], df['jst'], df['entries'], df['close'])
-    #plot_signal_marker(axes[0], df['jst'], df['exits'], df['close'], marker='x')
-    
-    labels = ['Close', 'Upper', 'Lower', 'EMA_entry']
-    plot_prices(axes[1], df['jst'], [df['close'], df['upper_minor'], df['lower_minor'], df['ema_entry']], colors, labels, graph_height) 
-    plot_signal_marker(axes[1], df['jst'], df['reversal_micro'], df['close'])
-    labels = ['Close', 'EMA']
-    colors = ['gray', 'Red']
-    
-    cl = df['close'].to_list()
-    trend = df['trend'].to_list()
-    n = len(cl)
-    buy = np.full(n, np.nan)
-    sell = np.full(n, np.nan)
-    for i in range(n):
-        if n == 0 and n == n - 1:
-            buy[i] = cl[i]
-            sell[i] = cl[i]
-        else:
-            if trend[i] == 1:
-                buy[i] = cl[i]
-            elif trend[i] == -1:
-                sell[i] = cl[i]
+    colors = [('gray', 1), ('red', 3), ('green', 3), ('red', 1), ('green', 1)]
+    labels = ['Close',  'major(+)', 'major(-)', 'minor(+)', 'minor(-)']
+    plot_prices(axes[0], df['jst'], [df['close'], df['upper_major'], df['lower_major'], df['upper_minor'], df['lower_minor']], colors, labels, graph_height)
 
-    colors = ['blue', 'green', 'red' ]
-    labels = ['ema_entry', 'buy', 'sell']
-    plot_prices(axes[2], df['jst'], [df['ema_entry'], buy, sell], colors, labels, graph_height) 
-    plot_signal_marker(axes[2], df['jst'], df['entries'], df['close'])
-    plot_signal_marker(axes[2], df['jst'], df['exits'], df['close'], marker='x')
     
-    axes[3].plot(df['jst'], df['trend_minor'], color='blue', label='Trend(Minor)')
+    labels = ['EMA_entry']
+    colors = [('blue', 1)]
+    plot_prices(axes[1], df['jst'], [df['ema_entry']], colors, labels, graph_height) 
+ 
+    plot_signal_marker(axes[1], df['jst'], df['entries'], df['close'])
+    plot_signal_marker(axes[1], df['jst'], df['exits'], df['close'], marker='x')
     
-    axes[4].plot(df['jst'], df['slope_exit'], color='blue', label='Slope for exit')
-    plot_signal_marker(axes[4], jst, df['exits'], df['slope_exit'], marker='x')
-    axes[4].hlines([0], jst[0],jst[-1], color="black", linestyles='dashed') 
-    #axes[4].plot(df['jst'], df['trend'], color='blue', label='Trend')
-    #axes[5].plot(df['jst'], df['trend_minor'], color='blue', label='Trend(Minor)')
+    axes[2].plot(df['jst'], df['trend_minor'], color='blue', label='Trend(Minor)')
+    axes[3].plot(df['jst'], df['slope_exit'], color='blue', label='Slope for exit')
+    plot_signal_marker(axes[3], jst, df['exits'], df['slope_exit'], marker='x')
+    axes[3].hlines([0], jst[0],jst[-1], color="black", linestyles='dashed') 
     
     
     title += '    ' + str(begin) + ' -> ' + str(end)
@@ -648,48 +624,43 @@ def load_data(symbol, begin, end):
     df = mt5.get_rates_jst(symbol, TimeFrame.M1, t, end)
     return df
 
-def test():
-    symbol = 'JP225'
-    ver = '4.3'
-    
-    if symbol == 'JP225':
-        height =1000
-    elif symbol == 'XAUUSD':
-        height = 30
-    
-    dir_path = f'./debug/{symbol}'
-    os.makedirs(dir_path, exist_ok=True)
-     
+def graph(symbols, ver):
+    heights = {'JP225': 1000, 'US30': 1000, 'US100': 500, 'XAUUSD': 30, 'USDJPY': 1.0}
     year = 2025
     month = 11
-    for day in range(1, 23):
-        begin = datetime(year, month, day, 8).astimezone(JST)
-        end = begin + timedelta(hours=16)
-        df = load_data(symbol, begin, end)
-        if len(df) < 1000:
-            continue
-        jst = df['jst'].to_list()
-        
-        #params = load_params('Montblanc', symbol, ver)
-        #param = params[0]
-        param = MontblancParam()
-        maron = Montblanc(symbol, param)
-        maron.calc(df)
+    day = 1
+    for symbol in symbols:
+        dir_path = f'./debug/{symbol}'
+        os.makedirs(dir_path, exist_ok=True)
+        params = load_params('Montblanc', symbol, ver)
+        param = params[0]
+        for day in range(day, 31):
+            for j in range(1, 3):
+                if j == 1:
+                    hour = 8
+                else:
+                    hour = 20
+                begin = datetime(year, month, day, hour).astimezone(JST)
+                end = begin + timedelta(hours=10)
+                df = load_data(symbol, begin, end)
+                if len(df) < 500:
+                    continue
+                jst = df['jst'].to_list()    
 
-        fig = plot_chart(symbol, maron.result_df(), begin, end, param, height)
-        if fig is None:
-            continue
-        path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}.png')
-        fig.savefig(path)        
-        #(r, columns), _ = maron.simulate_doten(begin, end)
-        #df_metric = pd.DataFrame(data=r, columns=columns)
-        #path = os.path.join(dir_path, f'montblanc_{symbol}_trade_{year}-{month}-{day}.csv')
-        #df_metric.to_csv(path, index=False)  
-        #df_profit.to_csv('./debug/montblanc_jp225_profit.csv', index=False)
+                maron = Montblanc(symbol, param)
+                maron.calc(df)
+                fig = plot_chart(symbol, maron.result_df(), begin, end, param, heights[symbol])
+                if fig is None:
+                    continue
+                path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}-{j}.png')
+                fig.savefig(path)        
     
+def test():
+    symbols = ['US30', 'JP225', 'US30', 'XAUUSD', 'USDJPY']
+    graph(symbols, '2')
     
 def test2():
-    for symbol in ['JP225', 'US30', 'US100', 'XAUUSD', 'USDJPY']:
+    for symbol in ['US30', 'JP225', 'US100', 'XAUUSD', 'USDJPY']:
         dic = load_all_data(symbol)  
         print(dic['jst'][-10:])
         #print(dic['utc'][-10:])
@@ -697,5 +668,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('USDJPY', 1, pass_phase1=True)
-    #test()
+    #optimize('JP225', 2.2)
+    test()

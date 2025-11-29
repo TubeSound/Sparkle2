@@ -85,65 +85,14 @@ class Montblanc:
                 } 
         
         df = pd.DataFrame(dic)
-        return df
-        
-    def difference(self, vector1, vector2, ma_window):
-        n = len(vector1)
-        dif = np.full(n, np.nan)
-        for i in range(n):
-            if is_nans([vector1[i], vector2[i]]):
-                continue
-            if vector2[i] == 0.0:
-                continue
-            dif[i] = (vector1[i] - vector2[i]) / vector2[i] * 100.0
-        if ma_window > 0:
-            return calc_sma(dif, ma_window)    
-        else:
-            return dif
+        return df   
         
     def count_value(self, array, value):
         n = 0
         for v in array:
             if v == value:
                 n += 1
-        return n
-        
-    def signal_filter(self, signal, dif, window, num_max):
-        n = len(signal)
-        counts = [0, 0]
-        out = np.full(n, 0)
-        for i in range(1, n):
-            if i == 0:
-                if signal[i] != 0:
-                    out[i] = signal[i]
-            else:
-                if signal[i] != 0:
-                    begin = i - window
-                    if begin < 0:
-                        begin = 0
-                    s = signal[begin: i]
-                    d = dif[begin: i] 
-                    if self.count_value(s, signal[i]) < num_max: 
-                        if signal[i] == 1:
-                            # Long   
-                            if dif[i] < min(d):
-                                out[i] = 1
-                                counts[0] += 1
-                        else:
-                            # Short
-                            if dif[i] > max(d):
-                                out[i] = -1
-                                counts[1] += 1
-        return out, counts                    
-            
-    def mask_with_trend(self, signal, trend):
-        n = len(signal)
-        out = np.full(n, 0)
-        for i in range(n):
-            if signal[i] == trend[i]:
-                out[i] = signal[i]
-        return out
-
+        return n                 
         
     def calc_ema(self, cl, term, trend):
         def search_term(trend, j):
@@ -215,7 +164,7 @@ class Montblanc:
  
         # exit
         self.trend_exit, self.slope_exit = slope_trend(self.ema_entry, self.param.filter_term_exit)
-        self.exits = self.make_exit(self.slope_exit, self.trend_minor)
+        self.exits = self.make_exit(self.slope_exit)
         
             
     def make_trend(self, trends):
@@ -240,16 +189,14 @@ class Montblanc:
                 entries[i] = trend[i]
         return entries
     
-    def make_exit(self, slope, trend_minor):
+    def make_exit(self, slope):
         n = len(slope)
         exits = np.full(n, 0)
         for i in range(1, n):
-            if trend_minor[i] > 0:
-                if slope[i - 1] >= 0 and slope[i] < 0:
-                    exits[i] = -1
-            elif trend_minor[i] < 0:
-                if slope[i - 1] <= 0 and  slope[i] > 0:
-                    exits[i] = 1
+            if slope[i - 1] >= 0 and slope[i] < 0:
+                exits[i] = -1
+            if slope[i - 1] <= 0 and  slope[i] > 0:
+                exits[i] = 1
         return exits
                         
     def simulate_doten(self, tbegin, tend):

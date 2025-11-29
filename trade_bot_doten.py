@@ -71,7 +71,7 @@ class TradeBot:
         self.strategy = strategy
         self.symbol = symbol
         self.timeframe = 'M1'
-        self.data_length =  2 * 24 * 60
+        self.data_length =  4 * 24 * 60
         self.invterval_seconds = 10
         self.param = param
         if strategy == 'MaronPie':
@@ -93,7 +93,7 @@ class TradeBot:
         utc = utcnow()
         jst = utc2localize(utc, JST)
         t_server = utc2localize(utc, self.server_timezone)  
-        s = 'JST*' + jst.strftime('%Y-%m-%d_%H:%M:%S') + ' (ServerTime:' +  t_server.strftime('%Y-%m-%d_%H:%M:%S') +')'
+        s = f'[{self.symbol}] ' + jst.strftime('%m-%d_%H:%M')
         for arg in args:
             s += ' '
             s += str(arg) 
@@ -194,7 +194,7 @@ class TradeBot:
         except:
             pass
         if judge:
-            print('Trailing Stop:', self.symbol, datetime.now())
+            self.debug_print('Trailing Stop:')
             self.close_all_positions()
             return
         t1 = datetime.now()
@@ -212,22 +212,22 @@ class TradeBot:
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
 
-        self.update_sl(self.act.upper_line, self.act.lower_line)
+        self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl)
         
         # ドテン
         ext = self.act.exits[-1]
         self.doten(ext)
         ent = self.act.entries[-1]     
         if ent == Signal.LONG:
-            sl = self.act.lower_line[-1]
+            sl = self.act.lower_minor[-1] - self.param.sl
             self.entry(Signal.LONG, jst[-1], sl)
             self.save_trade_manager()
         elif ent == Signal.SHORT:
-            sl = self.act.upper_line[-1]
+            sl = self.act.upper_minor[-1] + self.param.sl
             self.entry(Signal.SHORT, jst[-1], sl)
             self.save_trade_manager()
         
-    def update_sl(self, upper_line, lower_line):
+    def update_sl(self, upper_line, lower_line, offset):
         mt5_positions = self.mt5.get_positions(self.symbol)
         for p in mt5_positions:
             if p.symbol != self.symbol:
@@ -235,23 +235,29 @@ class TradeBot:
             if self.mt5.is_long(p.type):
                 if np.isnan(lower_line[-2]):
                     continue
+                if np.isnan(lower_line[-1]):
+                    #self.debug_print('Bad lower_line for stop')
+                    continue
                 if lower_line[-1] != lower_line[-2]:
                     # change sl
-                    sl = lower_line[-1]     
+                    sl = lower_line[-1] - offset
                     self.mt5.modify_sl(self.symbol, p.ticket, sl)
-                    self.debug_print('Changed Stoploss', self.symbol, p.sl, '->', sl)
+                    #self.debug_print('Changed Stoploss', p.sl, '->', sl)
             elif self.mt5.is_short(p.type):
                 if np.isnan(upper_line[-2]):
                     continue
+                if np.isnan(upper_line[-1]):
+                    #self.debug_print('Bad lower_line for stop')
+                    continue
                 if upper_line[-1] != upper_line[-2]:
-                    sl = upper_line[-1]
+                    sl = upper_line[-1] + offset
                     self.mt5.modify_sl(self.symbol, p.ticket, sl)
-                    self.debug_print('Changed Stoploss', self.symbol, p.sl, '->', sl)
+                    #self.debug_print('Changed Stoploss', p.sl, '->', sl)
         
     def doten(self, signal):
         if signal == 0:
             return
-        print('doten', signal, self.symbol, datetime.now())
+        #self.debug_print('doten', signal)
         positions = self.trade_manager.positions.copy()
         for ticket, position in positions.items():
             if signal == 1:
@@ -259,13 +265,13 @@ class TradeBot:
                 
                 if position.order_signal == Signal.SHORT:
                     self.close_position(position)
-                    print('close: down->up ', self.symbol, position.ticket)
+                    #self.debug_print('close: down->up ', position.ticket)
             elif signal == -1:
                 # up ->down
                 
                 if position.order_signal == Signal.LONG:
                     self.close_position(position)
-                    print('trend: up->down', self.symbol, position.ticket)
+                    #self.debug_print('trend: up->down', position.ticket)
         
     def remove_closed_positions(self):
         positions = self.mt5.get_positions(self.symbol)
@@ -274,10 +280,10 @@ class TradeBot:
     def close_position(self, position: PositionInfo):
         ret, _ = self.mt5.close_by_position_info(position)
         if ret:
-            self.debug_print('<Closed> Success', self.symbol, position.desc())
+            self.debug_print('<Exit> ', position.desc())
             self.trade_manager.remove_positions([position.ticket])
         else:
-            self.debug_print('<Closed> Fail', self.symbol, position.desc())           
+            self.debug_print('<Exit Fail>', position.desc())           
         return ret
     
     def close_all_positions(self):
@@ -299,18 +305,17 @@ class TradeBot:
         position_max = int(self.param.position_max)
         num =  self.mt5_position_num()
         if num >= position_max:
-            self.debug_print('<Entry> Request Canceled ', self.symbol, time,  'Position num', num)
+            self.debug_print('<Entry> Request Canceled ', 'Position num', num)
             return
         try:
             ret, position_info = self.mt5.entry(self.symbol, signal, time, volume, stoploss=sl) #, takeprofit=tp)
             if ret:
                 self.trade_manager.add_position(position_info)
-                self.debug_print('<Entry> signal', position_info.order_signal, position_info.symbol, position_info.entry_time)
+                self.debug_print(f'<Entry> signal:{position_info.order_signal}  ticket: {position_info.ticket} price: {position_info.entry_price}')
             else:
-                self.debug_print('<Entry Error> signal', signal, sl, tp)
+                self.debug_print('<Entry Error> signal', signal, sl)
         except Exception as e:
-            print(' ... Entry Error', e)
-            print(position_info)
+            self.debug_print(' ... Entry Error', e, position_info)
 
 def load_params(strategy, symbol, ver, volume, position_max):
     def array_str2int(s):
@@ -426,7 +431,7 @@ def montblanc():
                 ['US30', 0.1],
                 ['US100', 0.1]
             ]
-    execute(strategy, 5.3, items)    
+    execute(strategy, 2, items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
