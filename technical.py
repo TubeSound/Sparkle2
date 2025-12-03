@@ -654,8 +654,12 @@ def resample(df_m1, minutes):
     jst0 = pd.to_datetime(df0['jst'], format='ISO8601')
     df0['jst'] = jst0
     df0 = df0.set_index('jst')
-    df = df0[["open","high","low","close"]].resample(f"{minutes}min", label="right", closed="right").agg(agg)
-    df = df.dropna()
+    try:
+        df = df0[["open","high","low","close"]].resample(f"{minutes}min", label="right", closed="right").agg(agg)
+        df = df.dropna()
+    except:
+        print('Resample error', minutes)
+        exit
     jst1 = list(df.index)
     return df, jst0.to_list(), jst1
     

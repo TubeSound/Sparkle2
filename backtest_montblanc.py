@@ -230,24 +230,28 @@ def load_params(strategy, symbol, ver):
     return params
         
 def generate_param(symbol:str, param: MontblancParam):
-    param.position_max = rand_select([1, 2, 3, 4, 5, 7, 10])
+    param.position_max = 10
+    param.sl_mode = 'fix'
     param.ema_term_entry = rand_step(10, 60, 5)
     param.filter_term_exit = rand_step(10, 60, 5)
     param.atr_term = rand_step(5, 50, 5)
-    param.trend_major_minutes = rand_select([30, 60, 90, 120, 180, 240])
+    param.trend_minutes = rand_select([4, 5, 7, 10, 15, 30, 45, 60])
+    major_minutes = 0
+    while major_minutes < param.trend_minutes:
+        major_minutes = rand_select([30, 45, 60, 90, 120, 180, 240])
+    param.trend_major_minutes = major_minutes
     param.trend_major_multiply = rand_step(1.5, 3.5, 0.5)
-    param.trend_minutes = rand_select([5, 10, 15, 30])
     param.trend_multiply = rand_step(1.5, 3.5, 0.5)  
     if symbol in ['JP225', 'US30']:
-        param.sl = rand_step(200, 500, 100)
+        param.sl = rand_step(40, 100, 20)
     elif symbol in ['US100', 'GER40']:
-        param.sl = rand_step(100, 200, 50)
+        param.sl = rand_step(20, 50, 10)
     elif symbol in ['SP']:
         param.sl = rand_step(20, 50, 10)   
     elif symbol in ['XAUUSD']:
-        param.sl = rand_step(5, 20, 5)        
+        param.sl = rand_step(1, 5, 1)        
     elif symbol in ['USDJPY']:
-        param.sl = rand_step(0.1, 1, 0.1)
+        param.sl = rand_step(0.05, 0.5, 0.05)
     elif symbol in ['USOIL', 'XAGUSD']:
         param.sl = rand_step(0.1, 1, 0.1)
     elif symbol in ['UK100']:
@@ -306,7 +310,7 @@ def evaluate0(symbol, ver, params, dir_path):
         maron = Montblanc(symbol, param)
         rows = []
         t = tbegin
-        length = 2 * 24 * 60
+        length = 3 * 24 * 60
         while t <= tend:
             t0 = t - timedelta(days=3)
             t1 = t + timedelta(days=1)
@@ -374,7 +378,7 @@ def evaluate(symbol, ver, params, dir_path):
     tbegin = datetime(jst[0].year, jst[0].month, jst[0].day).astimezone(JST)
     tend = datetime(jst[-1].year, jst[-1].month, jst[-1].day).astimezone(JST) - timedelta(days=1)
 
-    length = 2 * 24 * 60
+    length = 3 * 24 * 60
 
     i = 0
     result = []
@@ -572,8 +576,12 @@ def optimize(symbol, ver, pass_phase1=False):
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
 
-    tbegin = datetime(2025, 11, 18, 9).astimezone(JST)
-    tend = datetime(2025, 11, 18, 22).astimezone(JST)  
+    if iver == 3:
+        tbegin = datetime(2025, 2, 26).astimezone(JST)
+        tend = datetime(2025, 4, 10).astimezone(JST)  
+    else:
+        tbegin = datetime(2025, 11, 18, 9).astimezone(JST)
+        tend = datetime(2025, 11, 18, 22).astimezone(JST)  
     
     dirpath = f'./Montblanc/v{ver}/Optimize/{symbol}'
     path = os.path.join(dirpath, f"{symbol}_v{ver}_params_phase1.xlsx")
@@ -668,5 +676,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    #optimize('JP225', 2.2)
-    test()
+    optimize('USDJPY', 3)
+    #test()

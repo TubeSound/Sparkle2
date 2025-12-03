@@ -211,19 +211,19 @@ class TradeBot:
         t2 = datetime.now()
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
-
-        self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl)
+        if self.param.sl_mode == 'atr':
+            self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl)
         
         # ドテン
         ext = self.act.exits[-1]
         self.doten(ext)
         ent = self.act.entries[-1]     
         if ent == Signal.LONG:
-            sl = self.act.lower_minor[-1] - self.param.sl
+            sl = self.calc_sl_price(True)
             self.entry(Signal.LONG, jst[-1], sl)
             self.save_trade_manager()
         elif ent == Signal.SHORT:
-            sl = self.act.upper_minor[-1] + self.param.sl
+            sl = self.calc_sl_price(False)
             self.entry(Signal.SHORT, jst[-1], sl)
             self.save_trade_manager()
         
@@ -298,6 +298,19 @@ class TradeBot:
             if position.symbol == self.symbol:
                 count += 1
         return count
+        
+    def calc_sl_price(self, is_long):
+        if self.param.sl_mode.lower() == 'fix':
+            if is_long:
+                return self.act.cl[-1] - self.param.sl
+            else:
+                return self.act.cl[-1] + self.param.sl
+        elif self.param.sl_mode.lower() == 'atr':
+            if is_long:
+                return self.act.lower_minor[-1] - self.param.sl
+            else:
+                return self.act.upper_minor[-1] + self.param.sl
+        raise Exception('Bad sl calc')
         
     def entry(self, signal, time, sl):
         volume = self.param.volume
@@ -425,7 +438,7 @@ def maronpie():
 def montblanc():
     strategy = 'Montblanc'
     items = [    # [symbol, volume, sl_loose]
-                ['XAUUSD', 0.002],
+                ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
                 ['JP225', 10], 
                 ['US30', 0.1],

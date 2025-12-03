@@ -7,6 +7,7 @@ from common import Columns, Indicators
 from trade_manager import TradeManager, Signal, PositionInfo
 
 class MontblancParam:
+    sl_mode = 'fix'
     ema_term_entry = 12
     filter_term_exit = 24
     atr_term = 14
@@ -21,6 +22,7 @@ class MontblancParam:
 
     def to_dict(self):
         dic = {
+                'sl_mode': self.sl_mode,
                 'ema_term_entry': self.ema_term_entry,
                 'filter_term_exit': self.filter_term_exit,
                 'atr_term': self.atr_term,
@@ -38,6 +40,7 @@ class MontblancParam:
     @staticmethod
     def load_from_dic(dic: dict):
         param = MontblancParam()   
+        param.sl_mode = dic['sl_mode'].lower()
         param.ema_term_entry = int(dic['ema_term_entry'])
         param.filter_term_exit = int(dic['filter_term_exit'])
         param.atr_term = int(dic['atr_term'])
