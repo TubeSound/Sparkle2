@@ -444,7 +444,7 @@ def montblanc():
                 ['US30', 0.1],
                 ['US100', 0.1]
             ]
-    execute(strategy, 2, items)    
+    execute(strategy, 3, items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    

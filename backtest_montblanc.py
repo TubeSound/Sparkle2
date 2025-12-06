@@ -240,8 +240,8 @@ def generate_param(symbol:str, param: MontblancParam):
     while major_minutes < param.trend_minutes:
         major_minutes = rand_select([30, 45, 60, 90, 120, 180, 240])
     param.trend_major_minutes = major_minutes
-    param.trend_major_multiply = rand_step(1.5, 3.5, 0.5)
-    param.trend_multiply = rand_step(1.5, 3.5, 0.5)  
+    param.trend_major_multiply = rand_step(1, 1.8, 0.1)
+    param.trend_multiply = rand_step(1, 1.8, 0.1)  
     if symbol in ['JP225', 'US30']:
         param.sl = rand_step(40, 100, 20)
     elif symbol in ['US100', 'GER40']:
@@ -435,6 +435,7 @@ def evaluate(symbol, ver, params, dir_path):
 
 
 def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
+    timestamp = list(timestamp)
     for i in range(len(signals)):
         color, width = colors[i]
         ax.plot(timestamp, signals[i], color=color, linewidth=width, alpha=0.5, label=labels[i])    
@@ -442,11 +443,8 @@ def plot_prices(ax, timestamp, signals, colors, labels, graph_height):
         vmin = min(signals[0])
         vmax = max(signals[0])
         center = (vmax + vmin) / 2
-        center = round_number(center, graph_height / 8)
-        try:
-            ax.set_ylim(center - graph_height / 2, center + graph_height / 2)
-        except:
-            pass
+        ax.axvline(timestamp[0], center - graph_height / 2, center + graph_height / 2, linewidth=10, color='black')
+       
 def plot_signal_marker(ax, timestamp, signal, values, marker=None):
     if type(timestamp) == pd.Series:
         timestamp = timestamp.to_list()
@@ -576,7 +574,7 @@ def optimize(symbol, ver, pass_phase1=False):
     print('Start', symbol, 'Ver.', ver)
     dic = load_all_data(symbol)
 
-    if iver == 3:
+    if iver >= 3:
         tbegin = datetime(2025, 2, 26).astimezone(JST)
         tend = datetime(2025, 4, 10).astimezone(JST)  
     else:
@@ -633,9 +631,9 @@ def load_data(symbol, begin, end):
     return df
 
 def graph(symbols, ver):
-    heights = {'JP225': 1000, 'US30': 1000, 'US100': 500, 'XAUUSD': 30, 'USDJPY': 1.0}
+    heights = {'JP225': 100, 'US30': 100, 'US100': 50, 'XAUUSD': 5, 'USDJPY': .1}
     year = 2025
-    month = 11
+    month = 12
     day = 1
     for symbol in symbols:
         dir_path = f'./debug/{symbol}'
@@ -662,10 +660,11 @@ def graph(symbols, ver):
                     continue
                 path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}-{j}.png')
                 fig.savefig(path)        
+                plt.close()
     
 def test():
-    symbols = ['US30', 'JP225', 'US30', 'XAUUSD', 'USDJPY']
-    graph(symbols, '2')
+    symbols = ['JP225', 'US100', 'US30', 'XAUUSD', 'USDJPY']
+    graph(symbols, '3')
     
 def test2():
     for symbol in ['US30', 'JP225', 'US100', 'XAUUSD', 'USDJPY']:
@@ -676,5 +675,5 @@ def test2():
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('USDJPY', 3)
-    #test()
+    #optimize('US30', 4)
+    test()
