@@ -194,14 +194,29 @@ def load_axiory_data(symbol):
 def load_all_data(symbol):
     import pickle
     path = f'../Axiory/{symbol}/{symbol}_m1.pkl'
+    path2 = f'../Axiory/{symbol}/{symbol}_m1_df.pkl'
     if os.path.isfile(path):
         with open(path, 'rb') as f:
             dic = pickle.load(f)
+        if not os.path.isfile(path2):
+            df = pd.DataFrame(dic)
+            with open(path2, mode='wb') as f2:
+                pickle.dump(df, f2)
     else:
         dic = load_axiory_data(symbol)
-        with open(path, mode='wb') as f:
-            pickle.dump(dic, f)
+        with open(path, mode='wb') as f3:
+            pickle.dump(dic, f3)
+    
     return dic
+
+def load_df(symbol):
+    import pickle
+    path = f'../Axiory/{symbol}/{symbol}_m1_df.pkl'
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            df = pickle.load(f)
+        return df
+    return None
 
 def load_params(strategy, symbol, ver):
     def array_str2int(s):
@@ -630,6 +645,19 @@ def load_data(symbol, begin, end):
     df = mt5.get_rates_jst(symbol, TimeFrame.M1, t, end)
     return df
 
+
+    
+def pickup_data(df0, begin, end, alpha ):
+    df1 = df0[df0['jst'] <= begin]
+    i0 = df1.index[-1]
+    df1 = df0[df0['jst'] <= end]
+    i1 = df1.index[-1]
+    i0 -= alpha
+    if i0 < 0:
+        return None
+    df = df0.iloc[i0: i1 + 1] 
+    return df
+
 def graph(symbols, ver):
     heights = {'JP225': 100, 'US30': 100, 'US100': 50, 'XAUUSD': 5, 'USDJPY': .1}
     year = 2025
@@ -638,6 +666,7 @@ def graph(symbols, ver):
     for symbol in symbols:
         dir_path = f'./debug/{symbol}'
         os.makedirs(dir_path, exist_ok=True)
+        df0 = load_df(symbol)
         params = load_params('Montblanc', symbol, ver)
         param = params[0]
         for day in range(day, 31):
@@ -648,11 +677,10 @@ def graph(symbols, ver):
                     hour = 20
                 begin = datetime(year, month, day, hour).astimezone(JST)
                 end = begin + timedelta(hours=10)
-                df = load_data(symbol, begin, end)
-                if len(df) < 500:
+                df = pickup_data(df0, begin, end, 2000)
+                if df is None:
                     continue
                 jst = df['jst'].to_list()    
-
                 maron = Montblanc(symbol, param)
                 maron.calc(df)
                 fig = plot_chart(symbol, maron.result_df(), begin, end, param, heights[symbol])
@@ -661,10 +689,14 @@ def graph(symbols, ver):
                 path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}-{j}.png')
                 fig.savefig(path)        
                 plt.close()
+                (data, columns), df_profit = maron.simulate_doten(begin, end)
+                path = os.apth.join(dir_path, f'montblanc_{symbol}_profit_{year}-{month}-{day}-{j}.csv')
+                df_profit.to_csv(path, index=False)
     
 def test():
-    symbols = ['JP225', 'US100', 'US30', 'XAUUSD', 'USDJPY']
-    graph(symbols, '3')
+    symbols = ['JP225', 'US100']
+    for symbol in symbols:
+        graph(symbols, '3')
     
 def test2():
     for symbol in ['US30', 'JP225', 'US100', 'XAUUSD', 'USDJPY']:

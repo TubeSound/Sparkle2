@@ -7,7 +7,8 @@ from common import Columns, Indicators
 from trade_manager import TradeManager, Signal, PositionInfo
 
 class MontblancParam:
-    sl_mode = 'fix'
+    sl_mode = 'fix' # fix/atr
+    sl_cond = 'close' # close/moment
     ema_term_entry = 12
     filter_term_exit = 24
     atr_term = 14
@@ -16,13 +17,13 @@ class MontblancParam:
     trend_minutes = 15
     trend_multiply = 2.0
     sl = 0.5
-    sl_loose = None
     position_max = 5
     volume = 0.01
 
     def to_dict(self):
         dic = {
                 'sl_mode': self.sl_mode,
+                'sl_cond': self.sl_cond,
                 'ema_term_entry': self.ema_term_entry,
                 'filter_term_exit': self.filter_term_exit,
                 'atr_term': self.atr_term,
@@ -31,7 +32,6 @@ class MontblancParam:
                 'trend_minutes': self.trend_minutes,
                 'trend_multiply': self.trend_multiply,
                 'sl': self.sl,
-                'sl_loose': self.sl_loose,
                 'position_max': self.position_max,
                 'volume': self.volume
                }
@@ -41,6 +41,7 @@ class MontblancParam:
     def load_from_dic(dic: dict):
         param = MontblancParam()   
         param.sl_mode = dic['sl_mode'].lower()
+        param.sl_cond = dic['sl_cond'].lower()
         param.ema_term_entry = int(dic['ema_term_entry'])
         param.filter_term_exit = int(dic['filter_term_exit'])
         param.atr_term = int(dic['atr_term'])
@@ -49,10 +50,6 @@ class MontblancParam:
         param.trend_minutes = int(dic['trend_minutes'])
         param.trend_multiply = float(dic['trend_multiply'])
         param.sl = float(dic['sl'])
-        if dic['sl_loose'] == None:
-            param.sl_loose = None
-        else:
-            param.sl_loose = float(dic['sl_loose'])
         param.position_max = int(dic['position_max'])
         param.volume = float(dic['volume'])
         return param    
@@ -203,10 +200,10 @@ class Montblanc:
         return exits
                         
     def simulate_doten(self, tbegin, tend):
-        def cleanup(i, h, l):
+        def cleanup(i, hi, lo, cl, how):
             close_tickets = []
             for ticket, position in manager.positions.items():
-                if position.is_sl(l, h):
+                if position.is_sl(hi, lo, cl, how):
                     position.profit = - position.sl
                     position.exit_time = jst[i]
                     position.exit_price = position.sl_price
@@ -216,9 +213,12 @@ class Montblanc:
                     exit_signal[i] = position.ticket
             manager.remove_positions(close_tickets)
             
-        def close_all(time, price, reason):
+        # Exitシグナルでクローズ
+        def close_all(time, exit_signal, price, reason):
             close_tickets = []
             for ticket, position in manager.positions.items():
+                if position.order_signal == exit_signal:
+                    continue
                 position.exit_price = price
                 position.exit_time = time
                 position.reason = reason
@@ -250,10 +250,10 @@ class Montblanc:
             profits['win_rate'][i] = win_rate
             if self.exits[i] != 0:
                 # doten
-                close_all(jst[i], self.cl[i], PositionInfo.REVERSAL)
+                close_all(jst[i], self.cl[i], self.exits[i], PositionInfo.REVERSAL)
             else:
                 # loss cut
-                cleanup(i, self.hi[i], self.lo[i])
+                cleanup(i, self.hi[i], self.lo[i], self.cl[i], self.param.sl_cond)
             entry = self.entries[i]    
             if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
                 continue

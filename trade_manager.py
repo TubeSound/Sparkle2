@@ -98,11 +98,23 @@ class PositionInfo:
             return self.tp_price is not None and (self.tp_price >= price_low)
         return False
 
-    def is_sl(self, price_low, price_high):
+    def is_sl(self, price_high, price_low, price_close, how):
+        if self.sl_price is None:
+            return False
         if self.order_signal == Signal.LONG:
-            return self.sl_price is not None and (self.sl_price > price_low)
+            if how == 'close':
+                return (price_close < self.sl_price)               
+            elif how == 'moment':
+                return (self.sl_price < price_low)
+            else:
+                raise Exception('Bad sl cond')
         elif self.order_signal == Signal.SHORT:
-            return self.sl_price is not None and (self.sl_price < price_high)
+            if how == 'close':
+                return (price_close > self.sl_price)
+            elif how == 'moment':
+                return (self.sl_price > price_high)
+            else:
+                raise Exception('Bad sl_cond')
         return False
 
     def desc(self):
