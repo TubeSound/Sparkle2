@@ -195,38 +195,10 @@ class Montblanc:
         return exits
                         
     def simulate_doten(self, tbegin, tend):
-        def cleanup(i, hi, lo, cl, how):
-            close_tickets = []
-            for ticket, position in manager.positions.items():
-                if position.is_sl(hi, lo, cl, how):
-                    position.profit = - position.sl
-                    position.exit_time = jst[i]
-                    position.exit_price = position.sl_price
-                    position.reason = PositionInfo.STOP_LOSS
-                    close_tickets.append(ticket)
-                    reason[i] = PositionInfo.STOP_LOSS
-                    exit_signal[i] = position.ticket
-            manager.remove_positions(close_tickets)
-            
-        # Exitシグナルでクローズ
-        def close_all(time, exit_signal, price, reason):
-            close_tickets = []
-            for ticket, position in manager.positions.items():
-                if position.order_signal == exit_signal:
-                    continue
-                position.exit_price = price
-                position.exit_time = time
-                position.reason = reason
-                if position.order_signal == Signal.LONG:
-                    position.profit = price - position.entry_price
-                else:
-                    position.profit = position.entry_price - price                
-                close_tickets.append(ticket)
-            manager.remove_positions(close_tickets)
+        manager = TradeManager(self.symbol, self.param)
             
         n = len(self.cl)
-        jst = self.timestamp
-        manager = TradeManager(self.symbol, 'M1')    
+        jst = self.timestam
         ticket = 1
         buy_signal = np.full(n, 0)
         sell_signal = np.full(n, 0)
@@ -236,19 +208,17 @@ class Montblanc:
         for i in range(n):
             if jst[i] < tbegin or jst[i] >= tend:
                 continue
-            
-            total, current, closed, count, win_rate = manager.calc_profit(self.cl[i])
+            time = self.jst[i]
+            price = [self.op[i], self.hi[i], self.lo[i], self.cl[i]]
+            total, current, closed, count, win_rate = manager.calc_profit_sum(time, price)
             profits['total_profit'][i] = total
             profits['current_profit'][i] = current
             profits['closed_profit'][i] = closed
             profits['trade_count'][i] = count
             profits['win_rate'][i] = win_rate
-            if self.exits[i] != 0:
-                # doten
-                close_all(jst[i], self.cl[i], self.exits[i], PositionInfo.REVERSAL)
-            else:
-                # loss cut
-                cleanup(i, self.hi[i], self.lo[i], self.cl[i], self.param.sl_cond)
+            
+            # 既存ポジションの更新
+            manager.update(time, price, self.exits[i])
             entry = self.entries[i]    
             if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
                 continue
@@ -261,26 +231,9 @@ class Montblanc:
             pos = PositionInfo(self.symbol, typ, jst[i], self.param.volume, ticket, self.cl[i], self.param.sl, 0)
             manager.add_position(pos)
             ticket += 1
-            
-        close_tickets = []
-        for ticket, position in manager.positions.items():
-            if position.order_signal == Signal.LONG:
-                position.profit = self.cl[-1] - position.entry_price
-                position.exit_time = jst[-1]
-                position.exit_price = self.cl[-1]
-                position.reason = PositionInfo.TIMEUP
-                exit_signal[-1] = ticket
-                reason[-1] = PositionInfo.TIMEUP
-                close_tickets.append(ticket)
-            elif position.order_signal == Signal.SHORT:
-                position.profit = position.entry_price - self.cl[-1] 
-                position.exit_time = jst[-1]
-                position.exit_price = self.cl[i]
-                position.reason = PositionInfo.TIMEUP
-                exit_signal[-1] = ticket
-                reason[-1] = PositionInfo.TIMEUP
-                close_tickets.append(ticket)
-        manager.remove_positions(close_tickets)    
+       
+        # シミュレーション終了時にオープンポジションを強制決済     
+        manager.timeup(time, price)
 
         self.buy_signal = buy_signal
         self.sell_signal = sell_signal
