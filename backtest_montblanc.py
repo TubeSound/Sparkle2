@@ -659,7 +659,6 @@ def pickup_data(df0, begin, end, alpha ):
     return df
 
 def graph(symbols, ver):
-    heights = {'JP225': 100, 'US30': 100, 'US100': 50, 'XAUUSD': 5, 'USDJPY': .1}
     year = 2025
     month = 12
     day = 1
@@ -677,26 +676,41 @@ def graph(symbols, ver):
                     hour = 20
                 begin = datetime(year, month, day, hour).astimezone(JST)
                 end = begin + timedelta(hours=10)
-                df = pickup_data(df0, begin, end, 2000)
-                if df is None:
-                    continue
-                jst = df['jst'].to_list()    
-                maron = Montblanc(symbol, param)
-                maron.calc(df)
-                fig = plot_chart(symbol, maron.result_df(), begin, end, param, heights[symbol])
-                if fig is None:
-                    continue
-                path = os.path.join(dir_path, f'montblanc_{symbol}_{year}-{month}-{day}-{j}.png')
-                fig.savefig(path)        
-                plt.close()
-                (data, columns), df_profit = maron.simulate_doten(begin, end)
-                path = os.apth.join(dir_path, f'montblanc_{symbol}_profit_{year}-{month}-{day}-{j}.csv')
-                df_profit.to_csv(path, index=False)
+                path = os.path.join(dir_path, f'{symbol}_{year}-{month}-{day}-{j}')
+                sim(symbol, df0, param, begin, end, path)
+               
+def sim(symbol, df, param, begin, end, filepath):
+    heights = {'JP225': 100, 'US30': 100, 'US100': 50, 'XAUUSD': 5, 'USDJPY': .1}
+    df1 = pickup_data(df, begin, end, 2000)
+    if df1 is None:
+        return
+    jst = df1['jst'].to_list()    
+    maron = Montblanc(symbol, param)
+    maron.calc(df1)
+    fig = plot_chart(symbol, maron.result_df(), begin, end, param, heights[symbol])
+    if fig is None:
+        return
+    path = filepath +'.png'
+    fig.savefig(path)        
+    plt.close()
+    (data, columns), df_profit = maron.simulate_doten(begin, end)
+    path = filepath + '.csv'
+    df_profit.to_csv(path, index=False)
     
 def test():
-    symbols = ['JP225', 'US100']
-    for symbol in symbols:
-        graph(symbols, '3')
+    symbol = 'JP225'
+    #load_all_data(symbol)
+    df0 = load_df(symbol)
+    param = MontblancParam()
+    begin = datetime(2025, 12, 3, 8).astimezone(JST)
+    end = begin + timedelta(hours=10)
+    dirpath = f'./debug/{symbol}'
+    os.makedirs(dirpath, exist_ok=True)
+    path = os.path.join(dirpath, f'{symbol}_')
+    
+    sim(symbol, df0, param, begin, end, path)  
+  
+  
     
 def test2():
     for symbol in ['US30', 'JP225', 'US100', 'XAUUSD', 'USDJPY']:

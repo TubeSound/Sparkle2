@@ -56,7 +56,7 @@ class Montblanc:
            
     def result_df(self):
         dic = {
-                'jst': self.timestamp,
+                'jst': self.jst,
                 'open': self.op, 
                 'high': self.hi,
                 'low': self.lo,
@@ -130,7 +130,7 @@ class Montblanc:
         return out
 
     def calc(self, df):
-        self.timestamp = df['jst'].tolist()
+        self.jst = df['jst'].tolist()
         self.op = df[Columns.OPEN].to_numpy()
         self.hi = df[Columns.HIGH].to_numpy()
         self.lo = df[Columns.LOW].to_numpy()
@@ -194,11 +194,24 @@ class Montblanc:
                 exits[i] = 1
         return exits
                         
+    def calc_sl(self, i, is_long):
+        if self.param.sl_mode == 'fix':
+            if is_long:
+               return self.cl[i] - self.param.sl_value
+            else:
+                return self.cl[i] + self.param.sl_value
+        elif self.param.sl_mode == 'atr':
+            if is_long:
+                return self.lower_minor[i] - self.param.sl_value
+            else:
+                return self.upper_minor[i] + self.param.sl_value
+            
+                        
     def simulate_doten(self, tbegin, tend):
         manager = TradeManager(self.symbol, self.param)
             
         n = len(self.cl)
-        jst = self.timestam
+        jst = self.jst
         ticket = 1
         buy_signal = np.full(n, 0)
         sell_signal = np.full(n, 0)
@@ -210,7 +223,7 @@ class Montblanc:
                 continue
             time = self.jst[i]
             price = [self.op[i], self.hi[i], self.lo[i], self.cl[i]]
-            total, current, closed, count, win_rate = manager.calc_profit_sum(time, price)
+            total, current, closed, count, win_rate = manager.calc_profit_sum()
             profits['total_profit'][i] = total
             profits['current_profit'][i] = current
             profits['closed_profit'][i] = closed
@@ -219,6 +232,8 @@ class Montblanc:
             
             # 既存ポジションの更新
             manager.update(time, price, self.exits[i])
+            if self.param.sl_mode == 'atr':
+                manager.update_sl(self.upper_minor[i], self.lower_minor[i])
             entry = self.entries[i]    
             if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
                 continue
@@ -228,7 +243,8 @@ class Montblanc:
             elif entry == Signal.SHORT:
                 typ =  mt5api.ORDER_TYPE_SELL_STOP_LIMIT
                 sell_signal[i] = ticket
-            pos = PositionInfo(self.symbol, typ, jst[i], self.param.volume, ticket, self.cl[i], self.param.sl, 0)
+            sl = self.calc_sl(i, entry == Signal.LONG)
+            pos = PositionInfo(self.symbol, typ, jst[i], self.param.volume, ticket, self.cl[i], self.param)
             manager.add_position(pos)
             ticket += 1
        

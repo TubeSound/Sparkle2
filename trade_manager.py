@@ -45,7 +45,7 @@ class Signal:
 
 class Param:
     sl_mode = 'fix' # fix/atr
-    sl_value = None
+    sl_value = 100
     stop_cond = 'close' # close/moment
     trail_hit_price = None
     trail_stop_percent = None
@@ -72,7 +72,7 @@ class PositionInfo:
                     NEG_BARS_STOP: 'NEG_BARS_STOP',       
                     }
 
-    def __init__(self, symbol, order_type: int, time: datetime, volume, ticket, price, sl, tp, param:Param):
+    def __init__(self, symbol, order_type: int, time: datetime, volume, ticket, price, param:Param):
         self.symbol = symbol
         self.order_type = order_type
         self.order_signal = Signal.order_type2signal(order_type)
@@ -80,8 +80,6 @@ class PositionInfo:
         self.ticket = ticket
         self.entry_time = time
         self.entry_price = float(price)
-        self.sl = sl
-        self.tp = tp
         self.param = param
         self.exit_time = None
         self.exit_price = None
@@ -91,7 +89,20 @@ class PositionInfo:
         self.neg_bar_count = 0
         self.closed = False
         self.reason = None
-
+        
+        self.sl_price = None
+        if self.param.sl_mode == 'fix':
+            if self.order_signal == Signal.LONG:
+                self.sl_price = price - self.param.sl_value
+            elif self.order_signal== Signal.SHORT:
+                self.sl_price = price + self.param.sl_value
+        
+    def update_sl_atr(self, upper, lower):
+         if self.param.sl_mode == 'atr':
+            if self.order_signal == Signal.LONG:
+                self.sl_price = lower
+            elif self.order_sign == Signal.SHORT:
+                self.sl_price = upper   
 
     def is_sl(self, price):
         op, hi, lo, cl = price
@@ -171,12 +182,12 @@ class PositionInfo:
         return s
 
     def array(self):
-        data = [self.symbol, self.order_type, self.volume, self.ticket, self.sl, self.tp, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, self.reason]
+        data = [self.symbol, self.order_type, self.volume, self.ticket, self.sl_price, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, self.reason]
         return data
 
     @staticmethod
     def array_columns():
-        return ['symbol', 'type', 'volume', 'ticket', 'sl', 'tp', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'profit', 'closed', 'reason']
+        return ['symbol', 'type', 'volume', 'ticket', 'sl', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'profit', 'closed', 'reason']
 
 class TradeManager:
     def __init__(self, symbol, param: Param):
@@ -186,16 +197,27 @@ class TradeManager:
         self.positions_closed: Dict[int, PositionInfo] = {}
 
     def update(self, time, price, exit_signal):
+        to_close = {}
         for ticket, position in self.positions.items():
             position.calc_profit(price)
             if position.is_sl(price):
-                self.move_to_closed(ticket, time, price, PositionInfo.STOP_LOSS)
+                to_close[ticket] = [time, price, PositionInfo.STOP_LOSS]
             elif position.is_trail_stop(price):
-                self.move_to_closed(ticket, time, price, PositionInfo.TRAILING_STOP)
+                to_close[ticket] = [time, price, PositionInfo.TRAILING_STOP]
             elif position.neg_bars(price):
-                self.move_to_closed(ticket, time, price, PositionInfo.NEG_BARS_STOP)
+                to_close[ticket] = [time, price, PositionInfo.NEG_BARS_STOP]
             elif position.is_reversal(exit_signal):
-                self.move_to_closed(ticket, time, price, PositionInfo.REVERSAL)
+                to_close[ticket] = [time, price, PositionInfo.REVERSAL]
+        for ticket, value in to_close.items():
+            self.move_to_closed(ticket, value[0], value[1], value[2])
+                
+    # Stop Loss Mode: 'atr'のときストップロス値を更新する。
+    def update_sl(self, upper, lower):
+        if self.param.sl_mode != 'atr':
+            return
+        for ticket, position in self.positions.items():
+            position.update_sl_atr(upper, lower)
+
                 
     def timeup(self, time, price):
         for ticket, position in self.positions.items():
