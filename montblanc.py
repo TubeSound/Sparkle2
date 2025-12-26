@@ -7,8 +7,9 @@ from common import Columns, Indicators
 from trade_manager import TradeManager, Param, Signal, PositionInfo
 
 class MontblancParam(Param):
+    reversal_mode = 'reversal_major' # 'slope' / 'reversal_major' / 'reversal_minor' 
     ema_term_entry = 12
-    filter_term_exit = 24
+    filter_term_exit = 48
     atr_term = 14
     trend_major_minutes = 60
     trend_major_multiply = 2.0
@@ -20,6 +21,7 @@ class MontblancParam(Param):
                 'sl_mode': self.sl_mode,
                 'stop_cond': self.stop_cond,
                 'sl_value': self.sl_value,
+                'reversal_mode': self.reversal_mode,
                 'ema_term_entry': self.ema_term_entry,
                 'filter_term_exit': self.filter_term_exit,
                 'atr_term': self.atr_term,
@@ -38,6 +40,7 @@ class MontblancParam(Param):
         param.sl_mode = dic['sl_mode'].lower()
         param.stop_cond = dic['stop_cond'].lower()
         param.sl_value = float(dic['sl_value'])
+        param.reversal_mode = dic['reversal_mode'].lower()
         param.ema_term_entry = int(dic['ema_term_entry'])
         param.filter_term_exit = int(dic['filter_term_exit'])
         param.atr_term = int(dic['atr_term'])
@@ -159,7 +162,7 @@ class Montblanc:
  
         # exit
         self.trend_exit, self.slope_exit = slope_trend(self.ema_entry, self.param.filter_term_exit)
-        self.exits = self.make_exit(self.slope_exit)
+        self.exits = self.make_exit()
         
             
     def make_trend(self, trends):
@@ -184,15 +187,23 @@ class Montblanc:
                 entries[i] = trend[i]
         return entries
     
-    def make_exit(self, slope):
+    def make_exit(self):
+        slope = self.slope_exit
         n = len(slope)
         exits = np.full(n, 0)
-        for i in range(1, n):
-            if slope[i - 1] >= 0 and slope[i] < 0:
-                exits[i] = -1
-            if slope[i - 1] <= 0 and  slope[i] > 0:
-                exits[i] = 1
+        if self.param.reversal_mode == 'slope':
+            for i in range(1, n):
+                if slope[i - 1] >= 0 and slope[i] < 0:
+                    exits[i] = -1
+                if slope[i - 1] <= 0 and  slope[i] > 0:
+                    exits[i] = 1
+            return exits
+        elif self.param.reversal_mode == 'reversal_major':
+            return self.reversal_major
+        elif self.param.reversal_mode == 'reversal_minor':
+            return self.reversal_minor                
         return exits
+        
                         
     def calc_sl(self, i, is_long):
         if self.param.sl_mode == 'fix':
@@ -218,6 +229,7 @@ class Montblanc:
         exit_signal = np.full(n, 0)
         reason = np.full(n, 0)
         profits = {'jst': jst, 'total_profit': np.full(n, 0.0), 'current_profit': np.full(n, 0.0), 'closed_profit': np.full(n, 0.0), 'trade_count': np.full(n, 0), 'win_rate': np.full(n, 0.0)}
+        time = None
         for i in range(n):
             if jst[i] < tbegin or jst[i] >= tend:
                 continue
@@ -235,7 +247,13 @@ class Montblanc:
             if self.param.sl_mode == 'atr':
                 manager.update_sl(self.upper_minor[i], self.lower_minor[i])
             entry = self.entries[i]    
-            if entry == 0 or (len(manager.open_positions()) > self.param.position_max):
+            if entry == 0:
+                continue
+            
+            num = len(manager.open_positions())
+            if num == 5:
+                debug = 1
+            if num >= self.param.position_max:
                 continue
             elif entry == Signal.LONG:
                 typ =  mt5api.ORDER_TYPE_BUY_STOP_LIMIT
@@ -249,7 +267,8 @@ class Montblanc:
             ticket += 1
        
         # シミュレーション終了時にオープンポジションを強制決済     
-        manager.timeup(time, price)
+        if time is not None:
+            manager.timeup(time, price)
 
         self.buy_signal = buy_signal
         self.sell_signal = sell_signal

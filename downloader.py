@@ -169,7 +169,7 @@ def main4(symbol, year, month, timeframe):
 if __name__ == '__main__':
     timeframe = 'M1'
     for symbol in ['USDJPY', 'XAUUSD', 'JP225', 'US100', 'US30']:
-        for m in [1-2]
+        for m in range(11, 13):
             main4(symbol, 2025, m, timeframe)
     
 

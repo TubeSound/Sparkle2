@@ -1,5 +1,3 @@
-# candle_chart.py
-
 import os
 import shutil
 import sys
@@ -18,7 +16,15 @@ from dateutil import tz
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')
 
-output_notebook()
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service)
+
+
+
+#output_notebook()
 
 TOOLS = "pan,wheel_zoom,box_zoom,box_select,crosshair,reset,save"
 TOOLTIPS=[  ( 'date',   '@date' ),
@@ -29,115 +35,19 @@ class TimeChart():
     Y_AXIS_2ND = 'axis2nd'
     
     
-    def __init__(self, title, width, height, ylabel='', date_format='%Y/%m/%d %H:%M'):
-        if width is None:        
-            self.fig = figure(  x_axis_type="linear",
-                                tools=TOOLS, 
-                                sizing_mode='stretch_width',
-                                outer_height=height,
-                                y_axis_label=ylabel,
-                                title = title)
-        else:
-            self.fig = figure(  x_axis_type="linear",
-                    tools=TOOLS, 
-                    outer_width=width,
-                    outer_height=height,
-                    #plot_width=width,
-                    #plot_height=height,
-                    y_axis_label=ylabel,
-                    title = title)
-        self.width = width
-        self.height = height
- 
-    def add_axis(self, ylabel='', yrange=None):
-        if yrange is None:   
-            self.fig.extra_y_ranges = {self.Y_AXIS_2ND: DataRange1d()}
-        else:
-            self.fig.extra_y_ranges = {self.Y_AXIS_2ND: DataRange1d(start=yrange[0], end=yrange[1])}
-        axis = LinearAxis(y_range_name=self.Y_AXIS_2ND, axis_label=ylabel)
-        self.fig.add_layout(axis,"right")
-        
-    def set_ylim(self, min, max, yrange):
-        r = max - min
-        if r > yrange:
-            upper = max
-            lower = max - yrange
-        else:
-            center = np.mean([min, max])
-            upper = center + yrange / 2
-            lower = center - yrange / 2
-        self.fig.y_range =  Range1d(lower, upper)
-
-    def line(self, time, y, extra_axis=False, **kwargs):
-        if extra_axis:
-            self.fig.line(time, np.array(y), y_range_name=self.Y_AXIS_2ND, **kwargs)
-        else:
-            self.fig.line(time, np.array(y), **kwargs)
-        
-    def scatter(self, ts, ys, **kwargs):
-        indices = [self.time_index(t) for t in ts]
-        self.fig.scatter(indices, np.array(ys), **kwargs)
-    
-        
-    def markers(self, signal, times, values, status, marker='o', color='black', alpha=1.0, size=10):
-        marks = {'o': 'circle', 'v': 'inverted_triangle', '^': 'triangle', '+': 'cross', 'x': 'x', '*': 'star'}
-        indices = []
-        ys = []
-        for i, (s, v) in enumerate(zip(signal, values)):
-            if s == status:
-                indices.append(i)
-                ys.append(v)
-        self.fig.scatter(times, np.array(ys), marker=marks[marker], color=color, alpha=alpha, size=size)
-        
-    def marker(self, time, value, marker='o', color='black', alpha=1.0, size=10):
-        marks = {'o': 'circle', 'v': 'inverted_triangle', '^': 'triangle', '+': 'cross', 'x': 'x', '*': 'star'}
-        self.fig.scatter([time], np.array([value]), marker=marks[marker], color=color, alpha=alpha, size=size)    
-        
-    def vline(self, time, color, width=None):
-        span = Span(location=time,
-                    dimension='height',
-                    line_color=color,
-                    line_alpha=0.1,
-                    line_width=width)
-        self.fig.add_layout(span)
-        
-    def hline(self, value, color, extra_axis=False, width=1):
-        array = np.full(len(self.indices), value)
-        self.line(array, extra_axis=extra_axis, line_width=width, color=color)
-        
-            
-    def text(self, time, y, text, color):
-        glyph = Text(x="x", y="y", text="text",  text_color=color, text_font_size='9pt')
-        source = ColumnDataSource(dict(x=[self.time_index(time)], y=[y], text=[text]))
-        self.fig.add_glyph(source, glyph)
-        
-    def plot_background(self, array, colors):
-        for i , a in enumerate(array):
-            if a > 0:
-                self.vline(i, colors[0])
-            elif a < 0:
-                self.vline(i, colors[1])    
-                
-    def to_png(self, filepath):
-        export_png(self.fig, filename=filepath)
-        
-class TimeSeriesChart(TimeChart):
-    Y_AXIS_2ND = 'axis2nd'
-    
-    
     def __init__(self, title, width, height, time, ylabel='', date_format='%Y/%m/%d %H:%M'):
         if width is None:        
             self.fig = figure(  x_axis_type="linear",
                                 tools=TOOLS, 
                                 sizing_mode='stretch_width',
-                                outer_height=height,
+                                height=height,
                                 y_axis_label=ylabel,
                                 title = title)
         else:
             self.fig = figure(  x_axis_type="linear",
                     tools=TOOLS, 
-                    outer_width=width,
-                    outer_height=height,
+                    width=width,
+                    height=height,
                     #plot_width=width,
                     #plot_height=height,
                     y_axis_label=ylabel,
@@ -158,15 +68,20 @@ class TimeSeriesChart(TimeChart):
             disp_time.append(time[-1] + i * dt)
         
         self.fig.xaxis.major_label_overrides = {i: d.strftime(date_format) for i, d in enumerate(disp_time)}
-        self.indices =  list(range(len(time)))
-        
+        self.indices = [i for i in range(len(time))]
+
     def time_index(self, time):
         if isinstance(time, int):
              return time
+        
+        # 修正ポイント1: '>' を '>=' に変更して正確な位置を返す
         for i, d in enumerate(self.time):
-            if d > time:
+            if d >= time: 
                 return i
-        return -1      
+        
+        # 修正ポイント2: 見つからなかった場合に -1 を返すと線がループするため、
+        # 最後のインデックスを返すようにする
+        return len(self.time) - 1
  
     def add_axis(self, ylabel='', yrange=None):
         if yrange is None:   
@@ -188,15 +103,19 @@ class TimeSeriesChart(TimeChart):
         self.fig.y_range =  Range1d(lower, upper)
 
     def line(self, y, extra_axis=False, **kwargs):
-        if extra_axis:
-            self.fig.line(self.indices, np.array(y), y_range_name=self.Y_AXIS_2ND, **kwargs)
+        # 修正ポイント3: yの長さが全データと同じなら、計算済みの self.indices を使うのが最も安全で高速です
+        # (元のコードだと毎回 O(n^2) のループが回り、かつ末尾でバグる可能性がありました)
+        if len(y) == len(self.indices):
+            indices = self.indices
         else:
-            self.fig.line(self.indices, np.array(y), **kwargs)
+            # 部分的なデータの場合は検索が必要
+            indices = [self.time_index(t) for t in self.time[:len(y)]]
+            
+        if extra_axis:
+            self.fig.line(indices, np.array(y), y_range_name=self.Y_AXIS_2ND, **kwargs)
+        else:
+            self.fig.line(indices, np.array(y), **kwargs)
         
-    def scatter(self, ts, ys, **kwargs):
-        indices = [self.time_index(t) for t in ts]
-        self.fig.scatter(indices, np.array(ys), **kwargs)
-    
         
     def markers(self, signal, values, status, marker='o', color='black', alpha=1.0, size=10):
         marks = {'o': 'circle', 'v': 'inverted_triangle', '^': 'triangle', '+': 'cross', 'x': 'x', '*': 'star'}
@@ -213,7 +132,31 @@ class TimeSeriesChart(TimeChart):
         index = self.time_index(time)
         if index >= 0 and index <= self.indices[-1]:
             self.fig.scatter([index], np.array([value]), marker=marks[marker], color=color, alpha=alpha, size=size)    
-        
+            
+    def scatter(self, value, marker='o', color='blue', alpha=0.5, size=2):
+        marks = {'o': 'circle', 'v': 'inverted_triangle', '^': 'triangle', '+': 'cross', 'x': 'x', '*': 'star'}
+        vs = []
+        indices = []
+        for v, t in zip(value, self.time):
+            if not np.isnan(v):
+                vs.append(v)
+                indices.append(self.time_index(t))
+        self.fig.scatter(indices, vs, marker=marks[marker], color=color, alpha=alpha, size=size)    
+
+    def line2(self, value, marker='o', color='blue', alpha=0.5, size=2):
+        marks = {'o': 'circle', 'v': 'inverted_triangle', '^': 'triangle', '+': 'cross', 'x': 'x', '*': 'star'}
+        vs = []
+        indices = []
+        value = np.array(value)
+        n = len(self.time)
+        for i in range(1, n):
+            x0 = self.time_index(i - 1)
+            y0 = value[i - 1]
+            x1 = self.time_index(i)
+            y1 = value[i]
+            if (not np.isnan(y0)) and (not np.isnan(y1)):
+                self.fig.scatter([x0, x1], [y0, y1], marker=marks[marker], color=color, alpha=alpha, size=size)    
+                
     def vline(self, index, color, width=None):
         if not isinstance(index, int):
             index = self.time_index(index)
@@ -244,7 +187,7 @@ class TimeSeriesChart(TimeChart):
                 self.vline(i, colors[1])    
                 
     def to_png(self, filepath):
-        export_png(self.fig, filename=filepath)
+        export_png(self.fig, filename=filepath, webdriver=driver)
         
 class CandleChart(TimeChart):
     def __init__(self, title, width, height, time, date_format='%Y/%m/%d %H:%M', yrange=None):
@@ -304,6 +247,9 @@ class CandleChart(TimeChart):
         if self.yrange is not None:
             self.set_ylim(self.min, self.max, self.yrange)
         
+  
+def fig2png(fig, filepath):
+    export_png(fig, filename=filepath, webdriver=driver)
                         
 
 def from_pickle(file):
@@ -330,7 +276,7 @@ def test():
     cl = np.array(data[Columns.CLOSE])
     chart = CandleChart(symbol, 1200, 500, jst)
     chart.plot_candle(op, hi, lo, cl)
-    export_png(chart.fig, filename='./debug/cancle_chart.png')
+    chart.to_png('./debug/candle_chart.png')
     
 def test1():
     from common import Columns
@@ -381,4 +327,4 @@ def test2():
 
 
 if __name__ == '__main__':
-    test1()
+    test()

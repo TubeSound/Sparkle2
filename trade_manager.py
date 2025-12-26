@@ -44,7 +44,7 @@ class Signal:
             return None
 
 class Param:
-    sl_mode = 'fix' # fix/atr
+    sl_mode = 'atr' # fix/atr
     sl_value = 100
     stop_cond = 'close' # close/moment
     trail_hit_price = None
@@ -100,9 +100,9 @@ class PositionInfo:
     def update_sl_atr(self, upper, lower):
          if self.param.sl_mode == 'atr':
             if self.order_signal == Signal.LONG:
-                self.sl_price = lower
-            elif self.order_sign == Signal.SHORT:
-                self.sl_price = upper   
+                self.sl_price = lower - self.param.sl_value
+            elif self.order_signal == Signal.SHORT:
+                self.sl_price = upper + self.param.sl_value
 
     def is_sl(self, price):
         op, hi, lo, cl = price
@@ -149,6 +149,8 @@ class PositionInfo:
         op, hi, lo, cl = price
         if self.param.neg_bar_max is None:
             return False
+        if self.param.neg_bar_max == 0:
+            return False
         profit = cl - self.entry_price
         if self.order_signal == Signal.SHORT:
             profit *= -1
@@ -182,7 +184,7 @@ class PositionInfo:
         return s
 
     def array(self):
-        data = [self.symbol, self.order_type, self.volume, self.ticket, self.sl_price, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, self.reason]
+        data = [self.symbol, Signal.order_type2signal(self.order_type), self.volume, self.ticket, self.sl_price, self.entry_time, self.entry_price, self.exit_time, self.exit_price, self.profit, self.closed, PositionInfo.close_reason[self.reason]]
         return data
 
     @staticmethod
@@ -220,8 +222,11 @@ class TradeManager:
 
                 
     def timeup(self, time, price):
+        to_close = []
         for ticket, position in self.positions.items():
             position.calc_profit(price)
+            to_close.append(ticket)    
+        for ticket in to_close:    
             self.move_to_closed(ticket, time, price, PositionInfo.TIMEUP)        
                 
     def history_df(self):
@@ -267,7 +272,8 @@ class TradeManager:
         for ticket, pos in list(self.positions.items()) + list(self.positions_closed.items()):
             d = pos.array()
             out.append(d)
-        return out, columns
+        df = pd.DataFrame(data=out, columns=columns)
+        return df
 
     def remove_positions(self, tickets):
         for ticket in tickets:
