@@ -67,14 +67,14 @@ def save(data, path):
     
 
 class TradeBot:
-    def __init__(self, strategy: str, symbol:str, param):
+    def __init__(self, strategy: str, symbol:str, param: MontblancParam):
         self.strategy = strategy
         self.symbol = symbol
         self.timeframe = 'M1'
         self.data_length =  4 * 24 * 60
         self.invterval_seconds = 10
         self.param = param
-        if strategy == 'MaronPie':
+        if strategy.lower() == 'maronPie':
             self.act = MaronPie(symbol, param)
         elif strategy.lower() == 'montblanc':
             self.act = Montblanc(symbol, param)
@@ -212,7 +212,7 @@ class TradeBot:
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
         if self.param.sl_mode == 'atr':
-            self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl)
+            self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl_value)
         
         # ドテン
         ext = self.act.exits[-1]

@@ -40,7 +40,11 @@ class MontblancParam(Param):
         param.sl_mode = dic['sl_mode'].lower()
         param.stop_cond = dic['stop_cond'].lower()
         param.sl_value = float(dic['sl_value'])
-        param.reversal_mode = dic['reversal_mode'].lower()
+        d = dic['reversal_mode']
+        if isinstance(d, float):
+            param.reversal_mode = ''
+        else:
+            param.reversal_mode = d.lower()
         param.ema_term_entry = int(dic['ema_term_entry'])
         param.filter_term_exit = int(dic['filter_term_exit'])
         param.atr_term = int(dic['atr_term'])
