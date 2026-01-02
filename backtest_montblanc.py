@@ -233,9 +233,10 @@ def load_params(strategy, symbol, ver):
     return params
         
 def generate_param(symbol:str, param: MontblancParam):
-    param.position_max = 10
+    param.position_max = 20
+    param.stop_cond = 'close'
     param.sl_mode = rand_select(['fix', 'atr'])
-    param.reversal_mode = rand_select(['', 'slope', 'reversal_major', 'reversal_minor'])
+    param.reversal_mode = rand_select(['slope', 'reversal_major', 'reversal_minor'])
     param.ema_term_entry = rand_step(10, 60, 5)
     param.filter_term_exit = rand_step(10, 120, 10)
     param.atr_term = rand_step(5, 50, 5)
@@ -254,7 +255,7 @@ def generate_param(symbol:str, param: MontblancParam):
         param.sl_value = rand_step(20, 50, 10)   
     elif symbol in ['XAUUSD']:
         param.sl_value = rand_step(1, 5, 1)        
-    elif symbol in ['USDJPY']:
+    elif symbol in ['USDJPY', 'NVDA']:
         param.sl_value = rand_step(0.05, 0.5, 0.05)
     elif symbol in ['USOIL', 'XAGUSD']:
         param.sl_value = rand_step(0.1, 1, 0.1)
@@ -641,26 +642,25 @@ def pickup_data(df0, begin, end, alpha ):
     df = df0.iloc[i0: i1 + 1] 
     return df
 
-def graph(symbols, ver):
-    year = 2025
-    month = 12
-    day = 1
-    for symbol in symbols:
-        dir_path = f'./debug/{symbol}'
-        os.makedirs(dir_path, exist_ok=True)
-        df0 = load_df(symbol)
-        params = load_params('Montblanc', symbol, ver)
-        param = params[0]
-        for day in range(day, 31):
-            for j in range(1, 3):
-                if j == 1:
-                    hour = 8
-                else:
-                    hour = 20
-                begin = datetime(year, month, day, hour).astimezone(JST)
-                end = begin + timedelta(hours=10)
-                path = os.path.join(dir_path, f'{symbol}_{year}-{month}-{day}-{j}')
-                sim(symbol, df0, param, begin, end, path)
+def graph(symbol, ver):
+    dir_path = f'./debug/{symbol}'
+    os.makedirs(dir_path, exist_ok=True)
+    date0 = datetime(2025, 12, 31).astimezone(JST)
+    date1 = datetime(2026, 1, 2).astimezone(JST)
+    df0 = load_data(symbol, date0, date1)
+    params = load_params('Montblanc', symbol, ver)
+    param = params[0]
+    for i in range(3):
+        begin = date0 + timedelta(days=i)
+        for j in range(1, 3):
+            if j == 1:
+                hour = 9
+            else:
+                hour = 20
+            t0 = begin + timedelta(hours=hour)
+            t1 = t0 + timedelta(hours=8)
+            path = os.path.join(dir_path, f'{symbol}_{begin.year}-{begin.month}-{begin.day}-{j}')
+            sim(symbol, df0, param, t0, t1, path)
                
 def sim(symbol, df, param, begin, end, filepath):
     heights = {'JP225': 100, 'US30': 100, 'US100': 50, 'XAUUSD': 5, 'USDJPY': .1}
@@ -683,20 +683,10 @@ def sim(symbol, df, param, begin, end, filepath):
     
 def test():
     symbol = 'JP225'
-    #load_all_data(symbol)
-    df0 = load_df(symbol)
-    param = MontblancParam()
-    begin = datetime(2025, 12, 23, 9).astimezone(JST)
-    end = begin + timedelta(hours=6)
-    dirpath = f'./debug/{symbol}'
-    os.makedirs(dirpath, exist_ok=True)
-    path = os.path.join(dirpath, f'{symbol}_')
-    
-    fig = sim(symbol, df0, param, begin, end, path)  
-    return fig
-  
+    graph(symbol, 1)
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     #loop()
-    optimize('US100', 1, pass_phase1=True)
+    optimize('XAUUSD', 3)
+    #test()

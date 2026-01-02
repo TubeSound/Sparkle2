@@ -249,8 +249,10 @@ class CandleChart(TimeChart):
         
   
 def fig2png(fig, filepath):
-    export_png(fig, filename=filepath, webdriver=driver)
-                        
+    try:
+        export_png(fig, filename=filepath, webdriver=driver)
+    except:
+        print('Error', filepath)                    
 
 def from_pickle(file):
     import pickle

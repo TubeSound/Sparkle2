@@ -7,7 +7,8 @@ import numpy as np
 from dateutil import tz
 from common import TimeFrame, Columns
 from time_utils import TimeUtils
-from trade_manager import PositionInfo, Signal
+from trade_manager import PositionInfo, Signal, Param
+
 JST = tz.gettz('Asia/Tokyo')
 UTC = tz.gettz('utc')  
 
@@ -100,7 +101,7 @@ class Mt5Trade:
     def set_symbol(self, symbol):
         self.symbol = symbol
         
-    def parse_order_result(self, result, time: datetime, stoploss, takeprofit):
+    def parse_order_result(self, result, time: datetime, stoploss, takeprofit, param):
         if result is None:
             print('Error')
             return False, None
@@ -110,7 +111,7 @@ class Mt5Trade:
         code = result.retcode
         if code == 10009:
             #print("注文完了", self.symbol, 'type', result.request.type, 'volume', result.volume)
-            position_info = PositionInfo(self.symbol, result.request.type, time, result.volume, result.order, result.price, stoploss, takeprofit)
+            position_info = PositionInfo(self.symbol, result.request.type, time, result.volume, result.order, result.price, param)
             return True, position_info
         elif code == 10013:
             print("無効なリクエスト")
@@ -134,7 +135,7 @@ class Mt5Trade:
         else:
             return None
         
-    def entry(self, symbol, signal: Signal, time: datetime, volume:float, stoploss=None, takeprofit=0, deviation=20):        
+    def entry(self, symbol, signal: Signal, time: datetime, param: Param, stoploss=0, takeprofit=0, deviation=20):        
         #point = mt5api.symbol_info(self.symbol).point
         price = self.current_price(symbol, signal)
         if signal == Signal.LONG:
@@ -147,7 +148,7 @@ class Mt5Trade:
         request = {
             "action": mt5api.TRADE_ACTION_DEAL,
             "symbol": symbol,
-            "volume": float(volume),
+            "volume": float(param.volume),
             "type": typ,
             "price": float(price),
             "deviation": deviation,# 許容スリップページ
@@ -172,7 +173,7 @@ class Mt5Trade:
                 request['tp'] = float(price - takeprofit)
         result = mt5api.order_send(request)
         #print('エントリー ', request)
-        return self.parse_order_result(result, time, stoploss, takeprofit)
+        return self.parse_order_result(result, time, stoploss, takeprofit, param)
     
     def get_positions(self, symbol):
         positions = mt5api.positions_get(symbol=symbol)
@@ -202,7 +203,7 @@ class Mt5Trade:
         elif self.is_short(position.type):
             price = tick.ask
             typ = mt5api.ORDER_TYPE_BUY
-        return self.close(typ, position.ticket, price, volume, deviation=deviation)
+        return self.close(typ, position.ticket, price, volume, self.param, deviation=deviation)
     
     def close_order_result(self, info: PositionInfo, volume=None, deviation=20):
         if volume is None:
@@ -216,7 +217,7 @@ class Mt5Trade:
             typ = mt5api.ORDER_TYPE_BUY
         return self.close(typ, info.ticket, price, volume, deviation=deviation)
 
-    def close_by_position_info(self, position_info: PositionInfo):
+    def close_by_position_info(self, position_info: PositionInfo, param: Param):
         tick = mt5api.symbol_info_tick(position_info.symbol)            
         if position_info.order_signal == Signal.LONG:
             price = tick.bid
@@ -224,9 +225,9 @@ class Mt5Trade:
         else:
             price = tick.ask
             typ = mt5api.ORDER_TYPE_BUY
-        return self.close(typ, position_info.ticket, price, position_info.volume)
+        return self.close(typ, position_info.ticket, price, param)
 
-    def close(self, typ, ticket, price, volume, deviation=20):
+    def close(self, typ, ticket, price, volume, param: Param, deviation=20):
         request = {
             "action": mt5api.TRADE_ACTION_DEAL,
             "position": ticket,
@@ -242,9 +243,9 @@ class Mt5Trade:
         }
         result = mt5api.order_send(request)
         #print('決済', request)
-        return self.parse_order_result(result, None, None, None)
+        return self.parse_order_result(result, None, None, None, param)
     
-    def modify_sl(self, symbol, ticket, sl_price):
+    def modify_sl(self, symbol, ticket, sl_price, param:Param):
         positions =self.get_positions(symbol)
         found = False
         for position in positions:
@@ -266,7 +267,7 @@ class Mt5Trade:
         
         result = mt5api.order_send(request)
         #print('Set SL', request, result)
-        return self.parse_order_result(result, None, None, None)
+        return self.parse_order_result(result, None, None, None, param)
     
     def close_all_position(self, symbol):
         positions = self.get_positions(symbol)

@@ -219,7 +219,6 @@ class TradeManager:
             return
         for ticket, position in self.positions.items():
             position.update_sl_atr(upper, lower)
-
                 
     def timeup(self, time, price):
         to_close = []
@@ -237,11 +236,10 @@ class TradeManager:
         self.positions[position.ticket] = position
 
     def move_to_closed(self, ticket, time, price, reason):
-        op, hi, lo, cl = price
         if ticket in self.positions.keys():
             pos = self.positions.pop(ticket)
             pos.exit_time = time
-            pos.exit_price = cl
+            pos.exit_price = price
             pos.reason = reason
             self.positions_closed[ticket] = pos
         else:
@@ -275,14 +273,14 @@ class TradeManager:
         df = pd.DataFrame(data=out, columns=columns)
         return df
 
-    def remove_positions(self, tickets):
+    def remove_positions(self, tickets, time, price, reason):
         for ticket in tickets:
-            self.move_to_closed(ticket)
+            self.move_to_closed(ticket, time, price, reason)
 
     def open_positions(self):
         return self.positions
 
-    def remove_position_auto(self, mt5_positions):
+    def remove_position_auto(self, mt5_positions, time, price, reason):
         remove_tickets = []
         for ticket, info in self.positions.items():
             found = False
@@ -293,7 +291,7 @@ class TradeManager:
             if not found:
                 remove_tickets.append(ticket)
         if len(remove_tickets):
-            self.remove_positions(remove_tickets)
+            self.remove_positions(remove_tickets, time, price, reason)
             print('<Closed by Meta Trader Stoploss or Takeprofit> ', self.symbol, 'tickets:', remove_tickets)
 
     def df_position(self):

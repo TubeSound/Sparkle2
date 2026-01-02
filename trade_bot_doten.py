@@ -81,7 +81,7 @@ class TradeBot:
         mt5 = Mt5Trade(3, 2, 11, 1, 3.0) 
         mt5.set_symbol(symbol)
         self.trade_manager = self.load_trade_manager()
-        self.set_trailing_stop()
+        #self.set_trailing_stop()
         
         self.last_time = None
         self.mt5 = mt5
@@ -170,7 +170,7 @@ class TradeBot:
     
     def update(self):
         t0 = datetime.now()
-        self.remove_closed_positions()
+        self.remove_closed_positions(t0, -1, 'auto')
         df = self.mt5.get_rates(self.symbol, self.timeframe, self.data_length)
         # remove invalid data
         df = df.iloc[:-1, :]
@@ -185,6 +185,8 @@ class TradeBot:
             else:
                 self.last_time = jst[-1]            
                 
+                
+        '''
         cl = df[Columns.CLOSE].to_list()        
         judge = self.trade_manager.judge_stop(cl[-1])
         try:
@@ -197,6 +199,8 @@ class TradeBot:
             self.debug_print('Trailing Stop:')
             self.close_all_positions()
             return
+        '''
+        
         t1 = datetime.now()
         self.act.calc(df)
         try:
@@ -211,12 +215,15 @@ class TradeBot:
         t2 = datetime.now()
         #print(t2, ' ... Elapsed time: ', t1 - t0, t2 - t1, 'total:', t2 - t0)
         
+        # ストップロスの更新
         if self.param.sl_mode == 'atr':
             self.update_sl(self.act.upper_minor, self.act.lower_minor, self.param.sl_value)
         
-        # ドテン
+        # exitシグナルで全ポジションリバーサル（ドテン）する。
         ext = self.act.exits[-1]
         self.doten(ext)
+        
+        # entryシグナルでエントリーする。
         ent = self.act.entries[-1]     
         if ent == Signal.LONG:
             sl = self.calc_sl_price(True)
@@ -241,7 +248,7 @@ class TradeBot:
                 if lower_line[-1] != lower_line[-2]:
                     # change sl
                     sl = lower_line[-1] - offset
-                    self.mt5.modify_sl(self.symbol, p.ticket, sl)
+                    self.mt5.modify_sl(self.symbol, p.ticket, sl, self.param)
                     #self.debug_print('Changed Stoploss', p.sl, '->', sl)
             elif self.mt5.is_short(p.type):
                 if np.isnan(upper_line[-2]):
@@ -251,7 +258,7 @@ class TradeBot:
                     continue
                 if upper_line[-1] != upper_line[-2]:
                     sl = upper_line[-1] + offset
-                    self.mt5.modify_sl(self.symbol, p.ticket, sl)
+                    self.mt5.modify_sl(self.symbol, p.ticket, sl, self.param)
                     #self.debug_print('Changed Stoploss', p.sl, '->', sl)
         
     def doten(self, signal):
@@ -273,12 +280,12 @@ class TradeBot:
                     self.close_position(position)
                     #self.debug_print('trend: up->down', position.ticket)
         
-    def remove_closed_positions(self):
+    def remove_closed_positions(self, time, price, reason):
         positions = self.mt5.get_positions(self.symbol)
-        self.trade_manager.remove_position_auto(positions)    
+        self.trade_manager.remove_position_auto(positions, time, price, reason)    
         
     def close_position(self, position: PositionInfo):
-        ret, _ = self.mt5.close_by_position_info(position)
+        ret, _ = self.mt5.close_by_position_info(position, self.param)
         if ret:
             self.debug_print('<Exit> ', position.desc())
             self.trade_manager.remove_positions([position.ticket])
@@ -302,14 +309,14 @@ class TradeBot:
     def calc_sl_price(self, is_long):
         if self.param.sl_mode.lower() == 'fix':
             if is_long:
-                return self.act.cl[-1] - self.param.sl
+                return self.act.cl[-1] - self.param.sl_value
             else:
-                return self.act.cl[-1] + self.param.sl
+                return self.act.cl[-1] + self.param.sl_value
         elif self.param.sl_mode.lower() == 'atr':
             if is_long:
-                return self.act.lower_minor[-1] - self.param.sl
+                return self.act.lower_minor[-1] - self.param.sl_value
             else:
-                return self.act.upper_minor[-1] + self.param.sl
+                return self.act.upper_minor[-1] + self.param.sl_value
         raise Exception('Bad sl calc')
         
     def entry(self, signal, time, sl):
@@ -321,14 +328,14 @@ class TradeBot:
             self.debug_print('<Entry> Request Canceled ', 'Position num', num)
             return
         try:
-            ret, position_info = self.mt5.entry(self.symbol, signal, time, volume, stoploss=sl) #, takeprofit=tp)
+            ret, position_info = self.mt5.entry(self.symbol, signal, time, self.param, stoploss=sl) #, takeprofit=tp)
             if ret:
                 self.trade_manager.add_position(position_info)
                 self.debug_print(f'<Entry> signal:{position_info.order_signal}  ticket: {position_info.ticket} price: {position_info.entry_price}')
             else:
                 self.debug_print('<Entry Error> signal', signal, sl)
         except Exception as e:
-            self.debug_print(' ... Entry Error', e, position_info)
+            self.debug_print(' ... Entry Error', e)
 
 def load_params(strategy, symbol, ver, volume, position_max):
     def array_str2int(s):
@@ -440,11 +447,11 @@ def montblanc():
     items = [    # [symbol, volume, sl_loose]
                 ['XAUUSD', 0.01],
                 ['USDJPY', 0.1],
-                ['JP225', 10], 
+                ['JP225', 100], 
                 ['US30', 0.1],
                 ['US100', 0.1]
             ]
-    execute(strategy, 3, items)    
+    execute(strategy, 1, items)    
     
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))    
